@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Interface_pattaya")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+525de9a9c323d201e0bc1583a5105c80586aa646")]
 [assembly: System.Reflection.AssemblyProductAttribute("Interface_pattaya")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Interface_pattaya")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
