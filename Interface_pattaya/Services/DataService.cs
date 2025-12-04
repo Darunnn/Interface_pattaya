@@ -110,7 +110,7 @@ namespace Interface_pattaya.Services
 
                                 var prescription = new PrescriptionData
                                 {
-                                    f_referenceCode = reader["f_referenceCode"]?.ToString(),
+                                    f_referenceCode = reader["f_referenceCode"]?.ToString()!,
                                     f_prescriptionno = reader["f_prescriptionnohis"]?.ToString(),
                                     f_prescriptionnohis = reader["f_prescriptionnohis"]?.ToString(),
                                     f_seq = reader["f_seq"]?.ToString(),
