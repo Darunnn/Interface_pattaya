@@ -6,7 +6,6 @@ using MySql.Data.MySqlClient;
 using Interface_pattaya.Configuration;
 using Interface_pattaya.Services;
 using Interface_pattaya.utils;
-using System.Windows.Forms;
 
 namespace Interface_pattaya
 {
@@ -36,20 +35,34 @@ namespace Interface_pattaya
                 if (!_appConfig.LoadConfiguration())
                 {
                     ShowAutoClosingMessageBox("ล้มเหลวในการโหลดการกำหนดค่า", "ข้อผิดพลาด");
-                    return;
+                    // ให้ UI ยังคงทำงานได้แม้ config ล้มเหลว
+                    _appConfig = new AppConfig(); // สร้าง config default
                 }
 
                 // Initialize logger
                 _logger = new LogManager();
+                _logger.LogInfo("=== Application Starting ===");
 
                 // Initialize data service
-                _dataService = new DataService(_appConfig.ConnectionString, AppConfig.ApiEndpoint);
+                if (_appConfig != null && !string.IsNullOrEmpty(_appConfig.ConnectionString))
+                {
+                    _dataService = new DataService(_appConfig.ConnectionString, AppConfig.ApiEndpoint);
+                }
 
                 // Set initial UI state
                 UpdateUIState();
 
                 // Display configuration summary
-                _logger.LogInfo(_appConfig.GetConfigurationSummary());
+                if (_appConfig != null)
+                {
+                    _logger.LogInfo(_appConfig.GetConfigurationSummary());
+                }
+
+                // ลงทะเบียน Button Click Events ก่อนที่จะทำอะไร
+                startStopButton.Click += StartStopButton_Click;
+                settingsButton.Click += SettingsButton_Click;
+                searchButton.Click += SearchButton_Click;
+                refreshButton.Click += RefreshButton_Click;
 
                 // Start connection check timer (check every 5 seconds)
                 _connectionCheckTimer = new System.Windows.Forms.Timer();
@@ -57,23 +70,24 @@ namespace Interface_pattaya
                 _connectionCheckTimer.Tick += ConnectionCheckTimer_Tick;
                 _connectionCheckTimer.Start();
 
-                // Set initial button state
-                startStopButton.Click += StartStopButton_Click;
-                settingsButton.Click += SettingsButton_Click;
-                searchButton.Click += SearchButton_Click;
-                refreshButton.Click += RefreshButton_Click;
+                _logger.LogInfo("Connection check timer started");
+
+                // ตรวจสอบการเชื่อมต่อครั้งแรกทันที
+                CheckDatabaseConnection();
 
                 // If AutoStart is enabled and database is connected, start service
-                if (_appConfig.AutoStart)
+                if (_appConfig != null && _appConfig.AutoStart && _isDatabaseConnected)
                 {
-                    Task.Delay(1000).ContinueWith(_ =>
+                    Task.Delay(2000).ContinueWith(_ =>
                     {
-                        if (_isDatabaseConnected)
+                        this.Invoke((MethodInvoker)delegate
                         {
                             StartService();
-                        }
+                        });
                     });
                 }
+
+                _logger.LogInfo("Application initialized successfully");
             }
             catch (Exception ex)
             {
@@ -91,6 +105,12 @@ namespace Interface_pattaya
         {
             try
             {
+                if (_appConfig == null || string.IsNullOrEmpty(_appConfig.ConnectionString))
+                {
+                    _logger?.LogWarning("Connection string is null or empty");
+                    return;
+                }
+
                 using (var connection = new MySqlConnection(_appConfig.ConnectionString))
                 {
                     try
@@ -101,39 +121,49 @@ namespace Interface_pattaya
                         {
                             _isDatabaseConnected = true;
                             _logger.LogConnectDatabase(true, DateTime.Now);
+                            _logger.LogInfo("Database connected successfully");
 
-                            // Update UI
+                            // Update UI on UI thread
                             this.Invoke((MethodInvoker)delegate
                             {
                                 connectionStatusLabel.Text = "Database: 🟢 Connected";
                                 connectionStatusLabel.ForeColor = System.Drawing.Color.Green;
                                 UpdateUIState();
 
+                                _logger.LogInfo("UI updated - database connected");
+
                                 // If service was running or AutoStart is enabled, start it
                                 if (_appConfig.AutoStart && !_isServiceRunning)
                                 {
+                                    _logger.LogInfo("AutoStart enabled - starting service");
                                     StartService();
                                 }
                             });
                         }
+
+                        connection.Close();
                     }
-                    catch (Exception)
+                    catch (MySqlException mySqlEx)
                     {
                         if (_isDatabaseConnected)
                         {
                             _isDatabaseConnected = false;
                             _logger.LogConnectDatabase(false, lastConnectedTime: DateTime.Now, lastDisconnectedTime: DateTime.Now);
+                            _logger.LogError("MySQL connection error", mySqlEx);
 
-                            // Update UI
+                            // Update UI on UI thread
                             this.Invoke((MethodInvoker)delegate
                             {
                                 connectionStatusLabel.Text = "Database: 🔴 Disconnected";
                                 connectionStatusLabel.ForeColor = System.Drawing.Color.Red;
                                 UpdateUIState();
 
+                                _logger.LogInfo("UI updated - database disconnected");
+
                                 // Stop service if running
                                 if (_isServiceRunning)
                                 {
+                                    _logger.LogInfo("Stopping service due to database disconnection");
                                     StopService();
                                 }
                             });
@@ -149,50 +179,90 @@ namespace Interface_pattaya
 
         private void UpdateUIState()
         {
-            // Enable/Disable start button based on connection status
-            startStopButton.Enabled = _isDatabaseConnected;
-            startStopButton.BackColor = _isDatabaseConnected
-                ? System.Drawing.Color.FromArgb(52, 152, 219)
-                : System.Drawing.Color.Gray;
+            try
+            {
+                // Enable/Disable start button based on connection status
+                startStopButton.Enabled = _isDatabaseConnected;
+                startStopButton.BackColor = _isDatabaseConnected
+                    ? System.Drawing.Color.FromArgb(52, 152, 219)
+                    : System.Drawing.Color.Gray;
 
-            // Update status label
-            statusLabel.Text = _isServiceRunning
-                ? "Status: ▶ Running"
-                : "Status: ⏹ Stopped";
+                // Update status label
+                statusLabel.Text = _isServiceRunning
+                    ? "Status: ▶ Running"
+                    : "Status: ⏹ Stopped";
+
+                _logger?.LogInfo($"UI State Updated - DB Connected: {_isDatabaseConnected}, Service Running: {_isServiceRunning}");
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError("Error updating UI state", ex);
+            }
         }
 
         private void StartStopButton_Click(object sender, EventArgs e)
         {
-            if (!_isDatabaseConnected)
+            try
             {
-                ShowAutoClosingMessageBox("ไม่สามารถเชื่อมต่อฐานข้อมูล", "ข้อผิดพลาด");
-                return;
-            }
+                _logger?.LogInfo("Start/Stop button clicked");
+                _logger?.LogInfo($"Current state - isServiceRunning: {_isServiceRunning}, isDatabaseConnected: {_isDatabaseConnected}");
 
-            if (_isServiceRunning)
-            {
-                StopService();
+                if (!_isDatabaseConnected)
+                {
+                    _logger?.LogWarning("Cannot start - database not connected");
+                    ShowAutoClosingMessageBox("ไม่สามารถเชื่อมต่อฐานข้อมูล กรุณารอสักครู่", "ข้อผิดพลาด");
+                    return;
+                }
+
+                if (_isServiceRunning)
+                {
+                    _logger?.LogInfo("Stopping service");
+                    StopService();
+                }
+                else
+                {
+                    _logger?.LogInfo("Starting service");
+                    StartService();
+                }
             }
-            else
+            catch (Exception ex)
             {
-                StartService();
+                _logger?.LogError("Error in StartStopButton_Click", ex);
+                ShowAutoClosingMessageBox($"ข้อผิดพลาด: {ex.Message}", "ข้อผิดพลาด");
             }
         }
 
         private void StartService()
         {
-            if (_isServiceRunning || !_isDatabaseConnected)
-                return;
-
             try
             {
+                if (_isServiceRunning)
+                {
+                    _logger?.LogWarning("Service is already running");
+                    return;
+                }
+
+                if (!_isDatabaseConnected)
+                {
+                    _logger?.LogWarning("Cannot start service - database not connected");
+                    ShowAutoClosingMessageBox("ฐานข้อมูลไม่เชื่อมต่อ", "ข้อผิดพลาด");
+                    return;
+                }
+
+                if (_dataService == null)
+                {
+                    _logger?.LogError("DataService is not initialized");
+                    ShowAutoClosingMessageBox("บริการข้อมูลไม่ได้รับการเริ่มต้น", "ข้อผิดพลาด");
+                    return;
+                }
+
                 _isServiceRunning = true;
                 _cancellationTokenSource = new CancellationTokenSource();
 
                 startStopButton.Text = "⏹ Stop";
                 startStopButton.BackColor = System.Drawing.Color.FromArgb(231, 76, 60);
 
-                _logger.LogInfo("Service started");
+                _logger.LogInfo("Service started successfully");
                 statusLabel.Text = "Status: ▶ Running";
                 lastCheckLabel.Text = $"Last Check: {DateTime.Now:HH:mm:ss}";
 
@@ -210,18 +280,21 @@ namespace Interface_pattaya
 
         private void StopService()
         {
-            if (!_isServiceRunning)
-                return;
-
             try
             {
+                if (!_isServiceRunning)
+                {
+                    _logger?.LogWarning("Service is not running");
+                    return;
+                }
+
                 _isServiceRunning = false;
                 _cancellationTokenSource?.Cancel();
 
                 startStopButton.Text = "▶ Start";
                 startStopButton.BackColor = System.Drawing.Color.FromArgb(52, 152, 219);
 
-                _logger.LogInfo("Service stopped");
+                _logger.LogInfo("Service stopped successfully");
                 statusLabel.Text = "Status: ⏹ Stopped";
                 UpdateUIState();
             }
@@ -233,10 +306,14 @@ namespace Interface_pattaya
 
         private async Task ProcessDataLoop(CancellationToken cancellationToken)
         {
+            int loopCount = 0;
             while (!cancellationToken.IsCancellationRequested && _isServiceRunning)
             {
                 try
                 {
+                    loopCount++;
+                    _logger?.LogInfo($"ProcessDataLoop iteration {loopCount}");
+
                     // Process data
                     var (successCount, failedCount, errors) = await _dataService.ProcessAndSendDataAsync();
 
@@ -265,10 +342,12 @@ namespace Interface_pattaya
                     _logger.LogInfo($"Processing complete: {successCount} success, {failedCount} failed");
 
                     // Wait for processing interval
-                    await Task.Delay(_appConfig.ProcessingIntervalSeconds * 1000, cancellationToken);
+                    int delayMs = (_appConfig?.ProcessingIntervalSeconds ?? 30) * 1000;
+                    await Task.Delay(delayMs, cancellationToken);
                 }
                 catch (OperationCanceledException)
                 {
+                    _logger?.LogInfo("ProcessDataLoop cancelled");
                     break;
                 }
                 catch (Exception ex)
@@ -277,31 +356,54 @@ namespace Interface_pattaya
                     await Task.Delay(5000, cancellationToken);
                 }
             }
+
+            _logger?.LogInfo("ProcessDataLoop ended");
         }
 
         private void SearchButton_Click(object sender, EventArgs e)
         {
-            string searchValue = searchTextBox.Text.Trim();
-            if (string.IsNullOrEmpty(searchValue))
+            try
             {
-                ShowAutoClosingMessageBox("กรุณาป้อนเลขที่ใบสั่งหรือ HN", "ข้อมูลไม่ครบ");
-                return;
-            }
+                string searchValue = searchTextBox.Text.Trim();
+                if (string.IsNullOrEmpty(searchValue))
+                {
+                    ShowAutoClosingMessageBox("กรุณาป้อนเลขที่ใบสั่งหรือ HN", "ข้อมูลไม่ครบ");
+                    return;
+                }
 
-            _logger?.LogInfo($"Search initiated for: {searchValue}");
-            // Implement search logic here
+                _logger?.LogInfo($"Search initiated for: {searchValue}");
+                // Implement search logic here
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError("Error in SearchButton_Click", ex);
+            }
         }
 
         private void RefreshButton_Click(object sender, EventArgs e)
         {
-            _logger?.LogInfo("Refresh button clicked");
-            // Implement refresh logic here
+            try
+            {
+                _logger?.LogInfo("Refresh button clicked");
+                // Implement refresh logic here
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError("Error in RefreshButton_Click", ex);
+            }
         }
 
         private void SettingsButton_Click(object sender, EventArgs e)
         {
-            _logger?.LogInfo("Settings button clicked");
-            // Implement settings dialog here
+            try
+            {
+                _logger?.LogInfo("Settings button clicked");
+                // Implement settings dialog here
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError("Error in SettingsButton_Click", ex);
+            }
         }
 
         /// <summary>
@@ -309,62 +411,72 @@ namespace Interface_pattaya
         /// </summary>
         private void ShowAutoClosingMessageBox(string message, string title = "แจ้งเตือน", int delayMs = 10000)
         {
-            // Create and show the message box
-            Form messageForm = new Form
+            try
             {
-                Text = title,
-                StartPosition = FormStartPosition.CenterParent,
-                AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F),
-                AutoScaleMode = AutoScaleMode.Font,
-                Width = 400,
-                Height = 200,
-                FormBorderStyle = FormBorderStyle.FixedDialog,
-                MaximizeBox = false,
-                MinimizeBox = false,
-                ShowInTaskbar = false,
-                TopMost = true
-            };
+                // Create and show the message box
+                Form messageForm = new Form
+                {
+                    Text = title,
+                    StartPosition = FormStartPosition.CenterParent,
+                    AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F),
+                    AutoScaleMode = AutoScaleMode.Font,
+                    Width = 400,
+                    Height = 200,
+                    FormBorderStyle = FormBorderStyle.FixedDialog,
+                    MaximizeBox = false,
+                    MinimizeBox = false,
+                    ShowInTaskbar = false,
+                    TopMost = true
+                };
 
-            Label messageLabel = new Label
+                Label messageLabel = new Label
+                {
+                    Text = message,
+                    Dock = DockStyle.Fill,
+                    TextAlign = System.Drawing.ContentAlignment.MiddleCenter,
+                    Padding = new Padding(10)
+                };
+
+                Button okButton = new Button
+                {
+                    Text = "ตกลง",
+                    DialogResult = DialogResult.OK,
+                    Dock = DockStyle.Bottom,
+                    Height = 40
+                };
+
+                messageForm.Controls.Add(messageLabel);
+                messageForm.Controls.Add(okButton);
+                messageForm.AcceptButton = okButton;
+
+                // Set timer to auto-close
+                _autoMessageBoxTimer = new System.Windows.Forms.Timer();
+                _autoMessageBoxTimer.Interval = delayMs;
+                _autoMessageBoxTimer.Tick += (s, e) =>
+                {
+                    _autoMessageBoxTimer.Stop();
+                    messageForm.Close();
+                };
+                _autoMessageBoxTimer.Start();
+
+                messageForm.ShowDialog(this);
+            }
+            catch (Exception ex)
             {
-                Text = message,
-                Dock = DockStyle.Fill,
-                TextAlign = System.Drawing.ContentAlignment.MiddleCenter,
-                Padding = new Padding(10)
-            };
-
-            Button okButton = new Button
-            {
-                Text = "ตกลง",
-                DialogResult = DialogResult.OK,
-                Dock = DockStyle.Bottom,
-                Height = 40
-            };
-
-            messageForm.Controls.Add(messageLabel);
-            messageForm.Controls.Add(okButton);
-            messageForm.AcceptButton = okButton;
-
-            // Set timer to auto-close
-            _autoMessageBoxTimer = new System.Windows.Forms.Timer();
-            _autoMessageBoxTimer.Interval = delayMs;
-            _autoMessageBoxTimer.Tick += (s, e) =>
-            {
-                _autoMessageBoxTimer.Stop();
-                messageForm.Close();
-            };
-            _autoMessageBoxTimer.Start();
-
-            messageForm.ShowDialog(this);
+                _logger?.LogError("Error showing auto-closing message box", ex);
+            }
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             try
             {
+                _logger?.LogInfo("=== Application Closing ===");
+
                 // Stop service
                 if (_isServiceRunning)
                 {
+                    _logger?.LogInfo("Stopping service before close");
                     StopService();
                 }
 
@@ -377,7 +489,7 @@ namespace Interface_pattaya
                 // Clean up services
                 _cancellationTokenSource?.Dispose();
 
-                _logger?.LogInfo("Application closing");
+                _logger?.LogInfo("Application closed successfully");
             }
             catch (Exception ex)
             {
