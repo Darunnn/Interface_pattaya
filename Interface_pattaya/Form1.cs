@@ -35,8 +35,7 @@ namespace Interface_pattaya
                 if (!_appConfig.LoadConfiguration())
                 {
                     ShowAutoClosingMessageBox("ล้มเหลวในการโหลดการกำหนดค่า", "ข้อผิดพลาด");
-                    // ให้ UI ยังคงทำงานได้แม้ config ล้มเหลว
-                    _appConfig = new AppConfig(); // สร้าง config default
+                    _appConfig = new AppConfig();
                 }
 
                 // Initialize logger
@@ -47,45 +46,34 @@ namespace Interface_pattaya
                 if (_appConfig != null && !string.IsNullOrEmpty(_appConfig.ConnectionString))
                 {
                     _dataService = new DataService(_appConfig.ConnectionString, AppConfig.ApiEndpoint);
+                    _logger.LogInfo($"DataService initialized with connection string");
+                }
+                else
+                {
+                    _logger.LogWarning("Connection string is empty or null");
                 }
 
                 // Set initial UI state
                 UpdateUIState();
 
-                // Display configuration summary
                 if (_appConfig != null)
                 {
                     _logger.LogInfo(_appConfig.GetConfigurationSummary());
                 }
 
-                // ลงทะเบียน Button Click Events ก่อนที่จะทำอะไร
-                startStopButton.Click += StartStopButton_Click;
-                settingsButton.Click += SettingsButton_Click;
-                searchButton.Click += SearchButton_Click;
-                refreshButton.Click += RefreshButton_Click;
-
-                // Start connection check timer (check every 5 seconds)
+                // Start connection check timer (check every 3 seconds for debugging)
                 _connectionCheckTimer = new System.Windows.Forms.Timer();
-                _connectionCheckTimer.Interval = 5000;
+                _connectionCheckTimer.Interval = 3000;  // ✅ ลดจาก 5000 เป็น 3000 เพื่อตรวจสอบเร็วขึ้น
                 _connectionCheckTimer.Tick += ConnectionCheckTimer_Tick;
                 _connectionCheckTimer.Start();
 
-                _logger.LogInfo("Connection check timer started");
+                _logger.LogInfo("Connection check timer started - checking every 3 seconds");
 
-                // ตรวจสอบการเชื่อมต่อครั้งแรกทันที
-                CheckDatabaseConnection();
-
-                // If AutoStart is enabled and database is connected, start service
-                if (_appConfig != null && _appConfig.AutoStart && _isDatabaseConnected)
+                // ตรวจสอบการเชื่อมต่อทันที
+                Task.Delay(500).ContinueWith(_ =>
                 {
-                    Task.Delay(2000).ContinueWith(_ =>
-                    {
-                        this.Invoke((MethodInvoker)delegate
-                        {
-                            StartService();
-                        });
-                    });
-                }
+                    CheckDatabaseConnection();
+                });
 
                 _logger.LogInfo("Application initialized successfully");
             }
@@ -115,65 +103,126 @@ namespace Interface_pattaya
                 {
                     try
                     {
+                        _logger?.LogInfo("Attempting to connect to database...");
                         connection.Open();
+                        _logger?.LogInfo("✅ Database connection successful!");
 
                         if (!_isDatabaseConnected)
                         {
                             _isDatabaseConnected = true;
                             _logger.LogConnectDatabase(true, DateTime.Now);
-                            _logger.LogInfo("Database connected successfully");
+                            _logger.LogInfo("Database connected successfully - updating UI");
 
                             // Update UI on UI thread
-                            this.Invoke((MethodInvoker)delegate
+                            if (this.InvokeRequired)
                             {
-                                connectionStatusLabel.Text = "Database: 🟢 Connected";
-                                connectionStatusLabel.ForeColor = System.Drawing.Color.Green;
-                                UpdateUIState();
-
-                                _logger.LogInfo("UI updated - database connected");
-
-                                // If service was running or AutoStart is enabled, start it
-                                if (_appConfig.AutoStart && !_isServiceRunning)
+                                this.Invoke((MethodInvoker)delegate
                                 {
-                                    _logger.LogInfo("AutoStart enabled - starting service");
-                                    StartService();
-                                }
-                            });
+                                    UpdateDatabaseConnectedUI();
+                                });
+                            }
+                            else
+                            {
+                                UpdateDatabaseConnectedUI();
+                            }
                         }
 
                         connection.Close();
                     }
                     catch (MySqlException mySqlEx)
                     {
+                        _logger?.LogError($"❌ MySQL Connection Error: {mySqlEx.Message}", mySqlEx);
+
                         if (_isDatabaseConnected)
                         {
                             _isDatabaseConnected = false;
                             _logger.LogConnectDatabase(false, lastConnectedTime: DateTime.Now, lastDisconnectedTime: DateTime.Now);
-                            _logger.LogError("MySQL connection error", mySqlEx);
 
                             // Update UI on UI thread
-                            this.Invoke((MethodInvoker)delegate
+                            if (this.InvokeRequired)
                             {
-                                connectionStatusLabel.Text = "Database: 🔴 Disconnected";
-                                connectionStatusLabel.ForeColor = System.Drawing.Color.Red;
-                                UpdateUIState();
-
-                                _logger.LogInfo("UI updated - database disconnected");
-
-                                // Stop service if running
-                                if (_isServiceRunning)
+                                this.Invoke((MethodInvoker)delegate
                                 {
-                                    _logger.LogInfo("Stopping service due to database disconnection");
-                                    StopService();
-                                }
-                            });
+                                    UpdateDatabaseDisconnectedUI();
+                                });
+                            }
+                            else
+                            {
+                                UpdateDatabaseDisconnectedUI();
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger?.LogError($"❌ Connection Error: {ex.Message}", ex);
+
+                        if (_isDatabaseConnected)
+                        {
+                            _isDatabaseConnected = false;
+
+                            if (this.InvokeRequired)
+                            {
+                                this.Invoke((MethodInvoker)delegate
+                                {
+                                    UpdateDatabaseDisconnectedUI();
+                                });
+                            }
+                            else
+                            {
+                                UpdateDatabaseDisconnectedUI();
+                            }
                         }
                     }
                 }
             }
             catch (Exception ex)
             {
-                _logger?.LogError("Error checking database connection", ex);
+                _logger?.LogError("Error in CheckDatabaseConnection", ex);
+            }
+        }
+
+        private void UpdateDatabaseConnectedUI()
+        {
+            try
+            {
+                connectionStatusLabel.Text = "Database: 🟢 Connected";
+                connectionStatusLabel.ForeColor = System.Drawing.Color.Green;
+
+                // ✅ เปิดใช้ปุ่ม Start
+                startStopButton.Enabled = true;
+                startStopButton.BackColor = System.Drawing.Color.FromArgb(52, 152, 219);
+
+                _logger?.LogInfo("UI updated - database connected, Start button enabled");
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError("Error updating connected UI", ex);
+            }
+        }
+
+        private void UpdateDatabaseDisconnectedUI()
+        {
+            try
+            {
+                connectionStatusLabel.Text = "Database: 🔴 Disconnected";
+                connectionStatusLabel.ForeColor = System.Drawing.Color.Red;
+
+                // ❌ ปิดใช้ปุ่ม Start
+                startStopButton.Enabled = false;
+                startStopButton.BackColor = System.Drawing.Color.Gray;
+
+                // Stop service if running
+                if (_isServiceRunning)
+                {
+                    _logger?.LogInfo("Stopping service due to database disconnection");
+                    StopService();
+                }
+
+                _logger?.LogInfo("UI updated - database disconnected, Start button disabled");
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError("Error updating disconnected UI", ex);
             }
         }
 
@@ -256,25 +305,33 @@ namespace Interface_pattaya
                     return;
                 }
 
+                // ตั้งค่า flag
                 _isServiceRunning = true;
                 _cancellationTokenSource = new CancellationTokenSource();
 
-                startStopButton.Text = "⏹ Stop";
-                startStopButton.BackColor = System.Drawing.Color.FromArgb(231, 76, 60);
+                // อัปเดต UI ทันที
+                this.Invoke((MethodInvoker)delegate
+                {
+                    startStopButton.Text = "⏹ Stop";
+                    startStopButton.BackColor = System.Drawing.Color.FromArgb(231, 76, 60);
+                    statusLabel.Text = "Status: ▶ Running";
+                    lastCheckLabel.Text = $"Last Check: {DateTime.Now:HH:mm:ss}";
+                });
 
                 _logger.LogInfo("Service started successfully");
-                statusLabel.Text = "Status: ▶ Running";
-                lastCheckLabel.Text = $"Last Check: {DateTime.Now:HH:mm:ss}";
 
-                // Start background process
+                // เริ่ม background process
                 Task.Run(() => ProcessDataLoop(_cancellationTokenSource.Token));
             }
             catch (Exception ex)
             {
                 _logger?.LogError("Error starting service", ex);
-                ShowAutoClosingMessageBox($"ข้อผิดพลาดในการเริ่มบริการ: {ex.Message}", "ข้อผิดพลาด");
                 _isServiceRunning = false;
-                UpdateUIState();
+                this.Invoke((MethodInvoker)delegate
+                {
+                    UpdateUIState();
+                });
+                ShowAutoClosingMessageBox($"ข้อผิดพลาดในการเริ่มบริการ: {ex.Message}", "ข้อผิดพลาด");
             }
         }
 
@@ -288,15 +345,24 @@ namespace Interface_pattaya
                     return;
                 }
 
+                // ตั้งค่า flag ทันที
                 _isServiceRunning = false;
-                _cancellationTokenSource?.Cancel();
 
-                startStopButton.Text = "▶ Start";
-                startStopButton.BackColor = System.Drawing.Color.FromArgb(52, 152, 219);
+                // ยกเลิก task
+                if (_cancellationTokenSource != null && !_cancellationTokenSource.IsCancellationRequested)
+                {
+                    _cancellationTokenSource.Cancel();
+                }
+
+                // อัปเดต UI
+                this.Invoke((MethodInvoker)delegate
+                {
+                    startStopButton.Text = "▶ Start";
+                    startStopButton.BackColor = System.Drawing.Color.FromArgb(52, 152, 219);
+                    statusLabel.Text = "Status: ⏹ Stopped";
+                });
 
                 _logger.LogInfo("Service stopped successfully");
-                statusLabel.Text = "Status: ⏹ Stopped";
-                UpdateUIState();
             }
             catch (Exception ex)
             {
@@ -372,7 +438,6 @@ namespace Interface_pattaya
                 }
 
                 _logger?.LogInfo($"Search initiated for: {searchValue}");
-                // Implement search logic here
             }
             catch (Exception ex)
             {
@@ -385,7 +450,6 @@ namespace Interface_pattaya
             try
             {
                 _logger?.LogInfo("Refresh button clicked");
-                // Implement refresh logic here
             }
             catch (Exception ex)
             {
@@ -398,7 +462,6 @@ namespace Interface_pattaya
             try
             {
                 _logger?.LogInfo("Settings button clicked");
-                // Implement settings dialog here
             }
             catch (Exception ex)
             {
@@ -406,14 +469,10 @@ namespace Interface_pattaya
             }
         }
 
-        /// <summary>
-        /// แสดง MessageBox ที่จะปิดอัตโนมัติหลังจาก 10 วินาที
-        /// </summary>
         private void ShowAutoClosingMessageBox(string message, string title = "แจ้งเตือน", int delayMs = 10000)
         {
             try
             {
-                // Create and show the message box
                 Form messageForm = new Form
                 {
                     Text = title,
@@ -449,7 +508,6 @@ namespace Interface_pattaya
                 messageForm.Controls.Add(okButton);
                 messageForm.AcceptButton = okButton;
 
-                // Set timer to auto-close
                 _autoMessageBoxTimer = new System.Windows.Forms.Timer();
                 _autoMessageBoxTimer.Interval = delayMs;
                 _autoMessageBoxTimer.Tick += (s, e) =>
@@ -473,20 +531,17 @@ namespace Interface_pattaya
             {
                 _logger?.LogInfo("=== Application Closing ===");
 
-                // Stop service
                 if (_isServiceRunning)
                 {
                     _logger?.LogInfo("Stopping service before close");
                     StopService();
                 }
 
-                // Clean up timers
                 _connectionCheckTimer?.Stop();
                 _connectionCheckTimer?.Dispose();
                 _autoMessageBoxTimer?.Stop();
                 _autoMessageBoxTimer?.Dispose();
 
-                // Clean up services
                 _cancellationTokenSource?.Dispose();
 
                 _logger?.LogInfo("Application closed successfully");

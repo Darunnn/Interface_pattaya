@@ -6,14 +6,12 @@ using System.Threading.Tasks;
 
 namespace Interface_pattaya.Models
 {
-    public class PrescriptionData
+    public class PrescriptionBodyRequest
     {
         public string UniqID { get; set; }
-        public string f_referenceCode { get; set; }
         public string f_prescriptionno { get; set; }
-        public string f_prescriptionnohis { get; set; }
-        public string f_seq { get; set; }
-        public string f_seqmax { get; set; }
+        public int f_seq { get; set; }
+        public int f_seqmax { get; set; }
         public string f_prescriptiondate { get; set; }
         public string f_ordercreatedate { get; set; }
         public string f_ordertargetdate { get; set; }
@@ -47,10 +45,10 @@ namespace Interface_pattaya.Models
         public string f_orderitemname { get; set; }
         public string f_orderitemnameTH { get; set; }
         public string f_orderitemnamegeneric { get; set; }
-        public string f_orderqty { get; set; }
+        public int f_orderqty { get; set; }
         public string f_orderunitcode { get; set; }
         public string f_orderunitdesc { get; set; }
-        public string f_dosage { get; set; }
+        public int f_dosage { get; set; }
         public string f_dosageunit { get; set; }
         public string f_dosagetext { get; set; }
         public string f_drugformcode { get; set; }
@@ -75,9 +73,13 @@ namespace Interface_pattaya.Models
         public string f_prn { get; set; }
         public string f_stat { get; set; }
         public string f_comment { get; set; }
-        public string f_tomachineno { get; set; }
+        public int f_tomachineno { get; set; }
         public string f_ipd_order_recordno { get; set; }
         public string f_status { get; set; }
-        public string f_remark { get; set; }
+    }
+
+    public class PrescriptionBodyResponse
+    {
+        public PrescriptionBodyRequest[] data { get; set; }
     }
 }

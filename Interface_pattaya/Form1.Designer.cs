@@ -126,6 +126,7 @@
             startStopButton.Size = new Size(163, 37);
             startStopButton.TabIndex = 0;
             startStopButton.Text = "▶ Start";
+            this.startStopButton.Click += new System.EventHandler(this.StartStopButton_Click);
             startStopButton.UseVisualStyleBackColor = false;
             // 
             // settingsButton
@@ -136,6 +137,7 @@
             settingsButton.Size = new Size(140, 37);
             settingsButton.TabIndex = 3;
             settingsButton.Text = "⚙️ Settings";
+            this.settingsButton.Click += new System.EventHandler(this.SettingsButton_Click);
             settingsButton.UseVisualStyleBackColor = true;
             // 
             // dateLabel
@@ -186,6 +188,7 @@
             searchButton.Size = new Size(105, 30);
             searchButton.TabIndex = 4;
             searchButton.Text = "🔍 Search";
+            this.searchButton.Click += new System.EventHandler(this.SearchButton_Click);
             searchButton.UseVisualStyleBackColor = false;
             // 
             // refreshButton
@@ -196,6 +199,7 @@
             refreshButton.Size = new Size(105, 30);
             refreshButton.TabIndex = 5;
             refreshButton.Text = "🔄 Refresh";
+            this.refreshButton.Click += new System.EventHandler(this.RefreshButton_Click);
             refreshButton.UseVisualStyleBackColor = true;
             // 
             // totalPanel
