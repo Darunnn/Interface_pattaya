@@ -591,7 +591,12 @@ namespace Interface_pattaya
             try
             {
                 string selectedDate = dateTimePicker.Value.ToString("yyyy-MM-dd");
-                _logger?.LogInfo($"Search initiated - Date: {selectedDate}");
+                _logger?.LogInfo($"🔍 Search initiated - Date: {selectedDate}");
+
+                // ⭐ เรียก debug ก่อน
+                await DebugDatabaseQuery(selectedDate);
+
+                // ⭐ แล้วโหลดข้อมูลตามปกติ
                 await LoadDataGridViewAsync(selectedDate);
             }
             catch (Exception ex)
@@ -637,14 +642,15 @@ namespace Interface_pattaya
                     ? DateTime.Now.ToString("yyyyMMdd")
                     : date.Replace("-", "");
 
-                _logger?.LogInfo($"Loading grid data - Date: {date}");
+                _logger?.LogInfo($"🔍 [DEBUG] Loading grid data - Input date: '{date}', Query date: '{queryDate}'");
 
                 if (_dataService == null)
                 {
-                    _logger?.LogWarning("DataService is not initialized");
+                    _logger?.LogWarning("⚠️ DataService is not initialized");
                     return;
                 }
 
+                // ⭐ อัพเดท UI ว่ากำลังโหลด
                 if (this.InvokeRequired)
                 {
                     this.Invoke((MethodInvoker)delegate
@@ -652,38 +658,32 @@ namespace Interface_pattaya
                         statusLabel.Text = "Status: ⏳ Loading data...";
                     });
                 }
+                else
+                {
+                    statusLabel.Text = "Status: ⏳ Loading data...";
+                }
 
+                // ⭐ ดึงข้อมูลจากฐานข้อมูล
                 var data = await _dataService.GetPrescriptionDataAsync(queryDate);
 
+                _logger?.LogInfo($"📊 [DEBUG] Retrieved {data.Count} records from database");
+
+                // ⭐ ต้อง Invoke เสมอเมื่ออัพเดท UI
                 if (this.InvokeRequired)
                 {
                     this.Invoke((MethodInvoker)delegate
                     {
-                        _processedDataTable.Rows.Clear();
-
-                        foreach (var item in data)
-                        {
-                            _processedDataTable.Rows.Add(
-                                DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
-                                item.Prescriptiondate,
-                                item.PrescriptionNo,
-                                item.HN,
-                                item.PatientName,                          
-                                item.Status == "1" ? "Success" : (item.Status == "3" ? "Failed" : "Pending")
-                            );
-                        }
-
-                        _filteredDataView.Sort = "[Time Check] DESC";
-                        UpdateSummaryCounts();
-
-                        statusLabel.Text = _isServiceRunning ? "Status: ▶ Running" : "Status: ⏹ Stopped";
-                        _logger?.LogInfo($"Grid loaded with {data.Count} rows");
+                        UpdateGridView(data);
                     });
+                }
+                else
+                {
+                    UpdateGridView(data);
                 }
             }
             catch (Exception ex)
             {
-                _logger?.LogError("Error loading DataGridView", ex);
+                _logger?.LogError("❌ Error loading DataGridView", ex);
 
                 if (this.InvokeRequired)
                 {
@@ -692,9 +692,82 @@ namespace Interface_pattaya
                         ShowAutoClosingMessageBox($"ข้อผิดพลาด: {ex.Message}", "ข้อผิดพลาด");
                     });
                 }
+                else
+                {
+                    ShowAutoClosingMessageBox($"ข้อผิดพลาด: {ex.Message}", "ข้อผิดพลาด");
+                }
             }
         }
+        private void UpdateGridView(List<GridViewDataModel> data)
+        {
+            try
+            {
+                _logger?.LogInfo($"📝 [DEBUG] Clearing DataTable, current rows: {_processedDataTable.Rows.Count}");
 
+                _processedDataTable.Rows.Clear();
+
+                _logger?.LogInfo($"➕ [DEBUG] Adding {data.Count} rows to DataTable");
+
+                int addedCount = 0;
+                foreach (var item in data)
+                {
+                    try
+                    {
+                        // ⭐ แปลง Status ให้ถูกต้อง
+                        string displayStatus = item.Status == "1" ? "Success" :
+                                              (item.Status == "3" ? "Failed" : "Pending");
+                        string formattedPrescriptionDate = FormatPrescriptionDate(item.Prescriptiondate);
+                        _processedDataTable.Rows.Add(
+                            DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                            formattedPrescriptionDate,
+                            item.PrescriptionNo,
+                            item.HN,
+                            item.PatientName,
+                            displayStatus
+                        );
+
+                        addedCount++;
+
+                        // ⭐ Log แถวแรกเพื่อ debug
+                        if (addedCount == 1)
+                        {
+                            _logger?.LogInfo($"📄 [DEBUG] First row: Rx={item.PrescriptionNo}, HN={item.HN}, Status={item.Status}→{displayStatus}");
+                        }
+                    }
+                    catch (Exception rowEx)
+                    {
+                        _logger?.LogError($"❌ Error adding row: Rx={item.PrescriptionNo}", rowEx);
+                    }
+                }
+
+                _logger?.LogInfo($"✅ [DEBUG] Added {addedCount}/{data.Count} rows successfully");
+
+                // ⭐ เรียงลำดับข้อมูล
+                _filteredDataView.Sort = "[Time Check] DESC";
+
+                // ⭐ อัพเดทสรุปยอด
+                UpdateSummaryCounts();
+
+                // ⭐ Refresh DataGridView
+                if (dataGridView.DataSource == null)
+                {
+                    _logger?.LogWarning("⚠️ [DEBUG] DataGridView.DataSource is NULL, setting it now");
+                    dataGridView.DataSource = _filteredDataView;
+                }
+                else
+                {
+                    dataGridView.Refresh();
+                }
+
+                statusLabel.Text = _isServiceRunning ? "Status: ▶ Running" : "Status: ⏹ Stopped";
+
+                _logger?.LogInfo($"✅ Grid loaded with {addedCount} rows, Total rows in table: {_processedDataTable.Rows.Count}");
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError("❌ Error in UpdateGridView", ex);
+            }
+        }
         // ⭐ Update Summary Counts from DataTable
         private void UpdateSummaryCounts()
         {
@@ -777,6 +850,108 @@ namespace Interface_pattaya
             }
         }
 
+        private async Task DebugDatabaseQuery(string date)
+        {
+            try
+            {
+                string queryDate = date.Replace("-", "");
+                _logger?.LogInfo($"🔍 [DEBUG CHECK] Checking database for date: {queryDate}");
+
+                // ตรวจสอบว่ามีข้อมูลวันนี้ไหม (ไม่สนใจ status)
+                string debugQuery = @"
+            SELECT COUNT(*) as total_count
+            FROM tb_thaneshosp_middle
+            WHERE SUBSTRING(f_prescriptiondate, 1, 8) = @QueryDate";
+
+                using (var connection = new MySqlConnection(_appConfig.ConnectionString))
+                {
+                    await connection.OpenAsync();
+                    using (var command = new MySqlCommand(debugQuery, connection))
+                    {
+                        command.Parameters.AddWithValue("@QueryDate", queryDate);
+                        var totalCount = await command.ExecuteScalarAsync();
+                        _logger?.LogInfo($"📊 [DEBUG] Total records for date {queryDate}: {totalCount}");
+                    }
+
+                    // ตรวจสอบว่ามีข้อมูลที่ status = 1 หรือ 3 ไหม
+                    string statusQuery = @"
+                SELECT 
+                    COUNT(*) as count,
+                    f_dispensestatus_conhis as status
+                FROM tb_thaneshosp_middle
+                WHERE SUBSTRING(f_prescriptiondate, 1, 8) = @QueryDate
+                GROUP BY f_dispensestatus_conhis";
+
+                    using (var command = new MySqlCommand(statusQuery, connection))
+                    {
+                        command.Parameters.AddWithValue("@QueryDate", queryDate);
+                        using (var reader = await command.ExecuteReaderAsync())
+                        {
+                            _logger?.LogInfo($"📊 [DEBUG] Status breakdown:");
+                            while (await reader.ReadAsync())
+                            {
+                                var status = reader["status"]?.ToString() ?? "NULL";
+                                var count = reader["count"]?.ToString() ?? "0";
+                                _logger?.LogInfo($"   Status '{status}': {count} records");
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError("❌ Error in debug query", ex);
+            }
+        }
+        private string FormatPrescriptionDate(string dateStr)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(dateStr))
+                    return "";
+
+                // ถ้ามีความยาว >= 14 ตัวอักษร (yyyyMMddHHmmss)
+                if (dateStr.Length >= 14)
+                {
+                    string year = dateStr.Substring(0, 4);
+                    string month = dateStr.Substring(4, 2);
+                    string day = dateStr.Substring(6, 2);
+                    string hour = dateStr.Substring(8, 2);
+                    string minute = dateStr.Substring(10, 2);
+                    string second = dateStr.Substring(12, 2);
+
+                    return $"{year}-{month}-{day} {hour}:{minute}:{second}";
+                }
+                // ถ้ามีความยาว >= 12 ตัวอักษร (yyyyMMddHHmm)
+                else if (dateStr.Length >= 12)
+                {
+                    string year = dateStr.Substring(0, 4);
+                    string month = dateStr.Substring(4, 2);
+                    string day = dateStr.Substring(6, 2);
+                    string hour = dateStr.Substring(8, 2);
+                    string minute = dateStr.Substring(10, 2);
+                   
+
+                    return $"{year}-{month}-{day} {hour}:{minute}:00";
+                }
+                // ถ้ามีความยาว >= 8 ตัวอักษร (yyyyMMdd)
+                else if (dateStr.Length >= 8)
+                {
+                    string year = dateStr.Substring(0, 4);
+                    string month = dateStr.Substring(4, 2);
+                    string day = dateStr.Substring(6, 2);
+
+                    return $"{year}-{month}-{day} 00:00:00";
+                }
+
+                return dateStr; // คืนค่าเดิมถ้าไม่ตรงรูปแบบ
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning($"⚠️ Error formatting date '{dateStr}': {ex.Message}");
+                return dateStr;
+            }
+        }
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             try

@@ -77,7 +77,7 @@ namespace Interface_pattaya.Models
         public string f_ipd_order_recordno { get; set; }
         public string f_status { get; set; }
         public string f_remark { get; set; }
-        public string f_symptom { get; set; }
+        public string f_labeltext { get; set; }
         public string f_durationtext { get; set; }
         public string f_dosagedispense_compare { get; set; }
     }

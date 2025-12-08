@@ -145,9 +145,7 @@ namespace Interface_pattaya.Services
                                     var freetext1Parts = freetext1.Split('^');
                                     var freetext2Parts = freetext2.Split('^');
 
-                                    var symptom = freetext1Parts.Length > 0 ? freetext1Parts[0] : "";
-                                    var durationtext = freetext1Parts.Length > 1 ? freetext1Parts[1] : "";
-                                    var dosagedispense_compare = freetext1Parts.Length > 2 ? freetext1Parts[2] : "";
+                               
 
                                     var orderCreateDate = CombineDateTime(
                                         reader["f_ordercreatedate"]?.ToString(),
@@ -234,10 +232,10 @@ namespace Interface_pattaya.Services
                                         f_tomachineno = int.TryParse(reader["f_tomachineno"]?.ToString(), out int machine) ? machine : 0,
                                         f_ipd_order_recordno = reader["f_ipdpt_record_no"]?.ToString(),
                                         f_status = reader["f_status"]?.ToString(),
-                                        f_remark = freetext2Parts.Length > 3 ? freetext2Parts[3] : "",
-                                        f_durationtext = durationtext,
-                                        f_symptom = symptom,
-                                        f_dosagedispense_compare = dosagedispense_compare
+                                        f_remark = freetext1Parts.Length > 0 ? freetext2Parts[0] : "",
+                                        f_durationtext = freetext1Parts.Length > 1 ? freetext2Parts[1] : "",
+                                        f_labeltext = freetext2Parts.Length > 2 ? freetext2Parts[2] : "",
+                                        f_dosagedispense_compare = freetext1Parts.Length > 2 ? freetext2Parts[2] : ""
                                     };
 
                                     var (apiSuccess, apiMessage) = await SendToApiWithRetryAsync(prescriptionBody);
