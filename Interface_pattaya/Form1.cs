@@ -33,11 +33,9 @@ namespace Interface_pattaya
         {
             try
             {
-                // Initialize logger first
                 _logger = new LogManager();
                 _logger.LogInfo("=== Application Starting ===");
 
-                // Load configuration
                 _appConfig = new AppConfig();
                 if (!_appConfig.LoadConfiguration())
                 {
@@ -46,7 +44,6 @@ namespace Interface_pattaya
                     return;
                 }
 
-                // Initialize data service
                 if (_appConfig != null && !string.IsNullOrEmpty(_appConfig.ConnectionString))
                 {
                     _dataService = new DataService(_appConfig.ConnectionString, _appConfig.ApiEndpoint, _logger);
@@ -59,16 +56,14 @@ namespace Interface_pattaya
                     return;
                 }
 
-                // Log configuration summary
                 if (_appConfig != null)
                 {
                     _logger.LogInfo(_appConfig.GetConfigurationSummary());
                 }
 
-                // Set initial UI state
                 UpdateUIState();
 
-                // ✅ Start connection check timer (every 3 seconds)
+                // ✅ START CONNECTION CHECK TIMER
                 _connectionCheckTimer = new System.Windows.Forms.Timer();
                 _connectionCheckTimer.Interval = 3000;
                 _connectionCheckTimer.Tick += ConnectionCheckTimer_Tick;
@@ -76,11 +71,11 @@ namespace Interface_pattaya
 
                 _logger.LogInfo("Connection check timer started");
 
-                // ✅ Check database immediately
+                // ✅ CHECK DATABASE IMMEDIATELY
                 Task.Delay(500).ContinueWith(_ => CheckDatabaseConnection());
 
-                // ✅ โหลดข้อมูล grid เมื่อ app เริ่มต้น
-                Task.Delay(2000).ContinueWith(_ => LoadDataGridViewAsync(DateTime.Now.ToString("yyyy-MM-dd")));
+                // ✅ FIX: LOAD INITIAL DATA PROPERLY WITH AWAIT
+                _ = LoadInitialDataAsync();
 
                 _logger.LogInfo("Application initialized successfully");
             }
@@ -88,6 +83,22 @@ namespace Interface_pattaya
             {
                 _logger?.LogError("Error initializing application", ex);
                 ShowAutoClosingMessageBox($"ข้อผิดพลาดการเริ่มต้น: {ex.Message}", "ข้อผิดพลาด");
+            }
+        }
+
+        // ✅ NEW METHOD: LOAD INITIAL DATA WITH PROPER ASYNC/AWAIT
+        private async Task LoadInitialDataAsync()
+        {
+            try
+            {
+                _logger?.LogInfo("⏳ Loading initial data...");
+                await Task.Delay(2000); // รอให้ connection และ database พร้อม
+                await LoadDataGridViewAsync(DateTime.Now.ToString("yyyy-MM-dd"));
+                _logger?.LogInfo("✅ Initial data loaded successfully");
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError("Error loading initial data", ex);
             }
         }
 
@@ -366,7 +377,6 @@ namespace Interface_pattaya
                         successCountLabel.Text = successCount.ToString();
                         failedCountLabel.Text = failedCount.ToString();
 
-                        // โหลดข้อมูล grid ใหม่
                         Task.Run(() => LoadDataGridViewAsync(DateTime.Now.ToString("yyyy-MM-dd")));
                     });
 
@@ -438,7 +448,6 @@ namespace Interface_pattaya
             try
             {
                 _logger?.LogInfo("Settings button clicked");
-                // ✅ Open settings dialog if needed
             }
             catch (Exception ex)
             {
@@ -450,6 +459,10 @@ namespace Interface_pattaya
         {
             try
             {
+                string queryDate = string.IsNullOrEmpty(date)
+          ? DateTime.Now.ToString("yyyyMMdd")
+          : date.Replace("-", "");
+                _logger?.LogInfo($"queryDate{queryDate}");
                 _logger?.LogInfo($"Loading grid data - Date: {date}, Search: {searchValue}");
 
                 if (_dataService == null)
@@ -458,7 +471,6 @@ namespace Interface_pattaya
                     return;
                 }
 
-                // ✅ ตั้งค่า UI ให้เป็นสถานะโหลด
                 if (this.InvokeRequired)
                 {
                     this.Invoke((MethodInvoker)delegate
@@ -468,13 +480,10 @@ namespace Interface_pattaya
                     });
                 }
 
-                string queryDate = string.IsNullOrEmpty(date)
-                    ? DateTime.Now.ToString("yyyy-MM-dd")
-                    : date;
+     
 
                 var data = await _dataService.GetPrescriptionDataAsync(queryDate);
 
-                // ถ้ามีการค้นหา ให้ filter เพิ่มเติม
                 if (!string.IsNullOrEmpty(searchValue))
                 {
                     data = data.Where(d =>
@@ -485,25 +494,17 @@ namespace Interface_pattaya
                     _logger?.LogInfo($"Filter applied: Found {data.Count} matching records");
                 }
 
-                // ✅ Update UI บน Thread ที่ถูกต้อง
                 if (this.InvokeRequired)
                 {
                     this.Invoke((MethodInvoker)delegate
                     {
-                        // Clear existing columns
                         dataGridView.DataSource = null;
                         dataGridView.Columns.Clear();
-
-                        // Bind data
                         dataGridView.DataSource = data;
 
-                        // Configure columns
                         ConfigureDataGridViewColumns();
-
-                        // Apply formatting
                         ApplyDataGridViewFormatting(data);
 
-                        // Update status
                         statusLabel.Text = _isServiceRunning ? "Status: ▶ Running" : "Status: ⏹ Stopped";
 
                         _logger?.LogInfo($"Grid loaded with {data.Count} rows");
@@ -511,17 +512,11 @@ namespace Interface_pattaya
                 }
                 else
                 {
-                    // Clear existing columns
                     dataGridView.DataSource = null;
                     dataGridView.Columns.Clear();
-
-                    // Bind data
                     dataGridView.DataSource = data;
 
-                    // Configure columns
                     ConfigureDataGridViewColumns();
-
-                    // Apply formatting
                     ApplyDataGridViewFormatting(data);
 
                     _logger?.LogInfo($"Grid loaded with {data.Count} rows");
@@ -574,7 +569,6 @@ namespace Interface_pattaya
                         col.Width = mapping.Width;
                     }
 
-                    // ตั้งให้คอลัมน์ Status แสดงในตรงกลาง
                     if (col.Name == "Status")
                     {
                         col.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
@@ -589,7 +583,7 @@ namespace Interface_pattaya
             }
         }
 
-        private void ApplyDataGridViewFormatting(List<GridViewDataModel>  data)
+        private void ApplyDataGridViewFormatting(List<GridViewDataModel> data)
         {
             try
             {
@@ -607,39 +601,30 @@ namespace Interface_pattaya
 
                                 if (status == "1")
                                 {
-                                    // สำเร็จ - สีเขียว
                                     statusCell.Style.BackColor = System.Drawing.Color.LightGreen;
                                     statusCell.Style.ForeColor = System.Drawing.Color.DarkGreen;
                                     statusCell.Value = "✅ สำเร็จ";
-
-                                    // ทำให้ text หนา
                                     statusCell.Style.Font = new System.Drawing.Font(
                                         dataGridView.Font.FontFamily,
                                         dataGridView.Font.Size,
                                         System.Drawing.FontStyle.Bold
                                     );
-
                                     row.Visible = true;
                                 }
                                 else if (status == "3")
                                 {
-                                    // ล้มเหลว - สีแดง
                                     statusCell.Style.BackColor = System.Drawing.Color.LightCoral;
                                     statusCell.Style.ForeColor = System.Drawing.Color.DarkRed;
                                     statusCell.Value = "❌ ล้มเหลว";
-
-                                    // ทำให้ text หนา
                                     statusCell.Style.Font = new System.Drawing.Font(
                                         dataGridView.Font.FontFamily,
                                         dataGridView.Font.Size,
                                         System.Drawing.FontStyle.Bold
                                     );
-
                                     row.Visible = true;
                                 }
                                 else
                                 {
-                                    // สถานะอื่น - ซ่อนแถว
                                     row.Visible = false;
                                 }
                             }

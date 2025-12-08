@@ -33,6 +33,7 @@ namespace Interface_pattaya.Services
             var errors = new List<string>();
             var currentDate = DateTime.Now.ToString("yyyyMMdd");
 
+            // ✅ FIX: เปลี่ยนจาก ISNULL ไป IS NULL
             string query = $@"
                 SELECT 
                     f_referenceCode,
@@ -93,7 +94,9 @@ namespace Interface_pattaya.Services
                     f_freetext1,
                     f_freetext2
                 FROM tb_thaneshosp_middle
-                WHERE ISNULL (f_dispensestatus_conhis) = '0'
+                WHERE (f_dispensestatus_conhis IS NULL 
+                       OR f_dispensestatus_conhis = '' 
+                       OR f_dispensestatus_conhis = '0')
                 AND SUBSTRING(f_prescriptiondate, 1, 8) = @CurrentDate
                 ORDER BY f_prescriptionnohis, f_seq";
 
@@ -125,7 +128,6 @@ namespace Interface_pattaya.Services
                                     var seq = reader["f_seq"]?.ToString() ?? "0";
                                     var prescriptionDate = reader["f_prescriptiondate"]?.ToString() ?? "";
 
-                                    // ✅ Extract date ตั้งแต่ต้น
                                     prescriptionDateFormatted = ExtractDate(prescriptionDate);
 
                                     if (string.IsNullOrEmpty(prescriptionNo))
@@ -137,7 +139,6 @@ namespace Interface_pattaya.Services
 
                                     _logger?.LogInfo($"Processing: Ref={referenceCode}, Rx={prescriptionNo}, Seq={seq}");
 
-                                    // ✅ ดึง freetext fields
                                     var freetext1 = reader["f_freetext1"]?.ToString() ?? "";
                                     var freetext2 = reader["f_freetext2"]?.ToString() ?? "";
 
@@ -148,7 +149,6 @@ namespace Interface_pattaya.Services
                                     var durationtext = freetext1Parts.Length > 1 ? freetext1Parts[1] : "";
                                     var dosagedispense_compare = freetext1Parts.Length > 2 ? freetext1Parts[2] : "";
 
-                                    // ✅ Date Processing
                                     var orderCreateDate = CombineDateTime(
                                         reader["f_ordercreatedate"]?.ToString(),
                                         reader["f_ordercreatetime"]?.ToString()
@@ -158,15 +158,12 @@ namespace Interface_pattaya.Services
                                         reader["f_orderaccepttime"]?.ToString()
                                     );
 
-                                    // ✅ Sex Processing (0=M, 1=F)
                                     var sex = ProcessSex(reader["f_sex"]?.ToString());
 
-                                    // ✅ PRN/STAT Processing
                                     var prnValue = reader["f_PRN"]?.ToString();
                                     var prn = ProcessPRN(prnValue, 1);
                                     var stat = ProcessPRN(prnValue, 2);
 
-                                    // ✅ สร้าง body request
                                     var prescriptionBody = new PrescriptionBodyRequest
                                     {
                                         UniqID = $"{referenceCode}-{currentDate}",
@@ -243,25 +240,19 @@ namespace Interface_pattaya.Services
                                         f_dosagedispense_compare = dosagedispense_compare
                                     };
 
-                                    // ✅ ส่ง API พร้อม Retry
                                     var (apiSuccess, apiMessage) = await SendToApiWithRetryAsync(prescriptionBody);
 
                                     if (apiSuccess)
                                     {
                                         successCount++;
                                         _logger?.LogInfo($"✅ API Success - Rx: {prescriptionNo}, Seq: {seq}");
-
-                                        // ✅ อัปเดต status เป็น 1 (สำเร็จ)
                                         await UpdateDispenseStatusAsync(prescriptionNo, prescriptionDateFormatted, "1");
                                     }
                                     else
                                     {
                                         failedCount++;
                                         _logger?.LogWarning($"❌ API Failed - Rx: {prescriptionNo}, Message: {apiMessage}");
-
-                                        // ✅ อัปเดต status เป็น 3 (ล้มเหลว)
                                         await UpdateDispenseStatusAsync(prescriptionNo, prescriptionDateFormatted, "3");
-
                                         errors.Add($"Prescription {prescriptionNo}: {apiMessage}");
                                     }
                                 }
@@ -270,7 +261,6 @@ namespace Interface_pattaya.Services
                                     failedCount++;
                                     _logger?.LogError($"❌ Row Processing Error - Rx: {prescriptionNo}", ex);
 
-                                    // ✅ อัปเดต status เป็น 3 เมื่อเกิด exception
                                     if (!string.IsNullOrEmpty(prescriptionNo) && !string.IsNullOrEmpty(prescriptionDateFormatted))
                                     {
                                         try
@@ -361,7 +351,6 @@ namespace Interface_pattaya.Services
 
                 _logger?.LogInfo($"📤 Sending API request to: {_apiUrl}");
                 _logger?.LogInfo($"Payload size: {json.Length} bytes");
-                _logger?.LogInfo($"📋 API Request Payload:\n{json}");
 
                 var content = new StringContent(json, Encoding.UTF8, "application/json");
                 var response = await _httpClient.PostAsync(_apiUrl, content);
@@ -370,7 +359,6 @@ namespace Interface_pattaya.Services
                 {
                     var responseContent = await response.Content.ReadAsStringAsync();
                     _logger?.LogInfo($"✓ API Response (200): {responseContent.Substring(0, Math.Min(200, responseContent.Length))}");
-                    _logger?.LogInfo($"📊 Full API Response:\n{responseContent}");
 
                     return (true, responseContent);
                 }
@@ -380,7 +368,6 @@ namespace Interface_pattaya.Services
                     var errorMsg = $"API Error {(int)response.StatusCode}: {response.ReasonPhrase}";
                     _logger?.LogWarning($"❌ {errorMsg}");
                     _logger?.LogWarning($"Response: {errorContent.Substring(0, Math.Min(500, errorContent.Length))}");
-                    _logger?.LogWarning($"📊 Full Error Response:\n{errorContent}");
 
                     return (false, errorMsg);
                 }
@@ -405,7 +392,6 @@ namespace Interface_pattaya.Services
                 return;
             }
 
-            // ✅ DEBUG: Log ค่าที่จะใช้ update
             _logger?.LogInfo($"🔧 [UPDATE STATUS] Rx: {prescriptionNo}, Date: {prescriptionDate}, NewStatus: {status}");
 
             string query = @"
@@ -455,29 +441,31 @@ namespace Interface_pattaya.Services
                 _logger?.LogError($"❌ [DB ERROR] General Exception updating Rx={prescriptionNo}", ex);
             }
         }
+
         public async Task<List<GridViewDataModel>> GetPrescriptionDataAsync(string date = "")
         {
             var dataList = new List<GridViewDataModel>();
-            var queryDate = string.IsNullOrEmpty(date) ? DateTime.Now.ToString("yyyyMMdd") : date.Replace("-", "");
+            var queryDate = string.IsNullOrEmpty(date)
+         ? DateTime.Now.ToString("yyyyMMdd")
+         : date.Replace("-", "");
 
             string query = $@"
-        SELECT 
-            f_prescriptionnohis,
-            f_seq,
-            f_seqmax,
-            f_prescriptiondate,
-            f_patientname,
-            f_hn,
-            f_orderitemnameTH,
-            f_orderqty,
-            f_orderunitdesc,
-            f_dosagedispense,
-            f_dispensestatus_conhis,
-            f_remark
-        FROM tb_thaneshosp_middle
-        WHERE SUBSTRING(f_prescriptiondate, 1, 8) = @QueryDate
-        AND f_dispensestatus_conhis IN ('1', '3')
-        ORDER BY f_prescriptionnohis, f_seq";
+                SELECT 
+                    f_prescriptionnohis,
+                    f_seq,
+                    f_seqmax,
+                    f_prescriptiondate,
+                    f_patientname,
+                    f_hn,
+                    f_orderitemnameTH,
+                    f_orderqty,
+                    f_orderunitdesc,
+                    f_dosagedispense,
+                    f_dispensestatus_conhis
+                FROM tb_thaneshosp_middle
+                WHERE SUBSTRING(f_prescriptiondate, 1, 8) = @QueryDate
+                AND f_dispensestatus_conhis IN ('1', '3')
+                ORDER BY f_prescriptionnohis, f_seq";
 
             _logger?.LogInfo($"📥 Loading grid data for date: {queryDate}");
 
@@ -512,7 +500,6 @@ namespace Interface_pattaya.Services
                                         OrderUnit = reader["f_orderunitdesc"]?.ToString() ?? "",
                                         Dosage = reader["f_dosagedispense"]?.ToString() ?? "",
                                         Status = status,
-                                        Remark = reader["f_remark"]?.ToString() ?? ""
                                     };
 
                                     dataList.Add(item);
@@ -535,12 +522,12 @@ namespace Interface_pattaya.Services
 
             return dataList;
         }
+
         private string ExtractDate(string dateStr)
         {
             if (string.IsNullOrEmpty(dateStr))
                 return "";
 
-            // ✅ ตัด 8 ตัวแรก (yyyyMMdd)
             if (dateStr.Length >= 8)
                 return dateStr.Substring(0, 8);
 
@@ -584,7 +571,5 @@ namespace Interface_pattaya.Services
 
             return (type == 1 && value == 1) || (type == 2 && value == 2) ? "1" : "0";
         }
-
-       
     }
 }
