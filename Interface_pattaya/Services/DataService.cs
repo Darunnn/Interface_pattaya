@@ -455,7 +455,86 @@ namespace Interface_pattaya.Services
                 _logger?.LogError($"❌ [DB ERROR] General Exception updating Rx={prescriptionNo}", ex);
             }
         }
+        public async Task<List<GridViewDataModel>> GetPrescriptionDataAsync(string date = "")
+        {
+            var dataList = new List<GridViewDataModel>();
+            var queryDate = string.IsNullOrEmpty(date) ? DateTime.Now.ToString("yyyyMMdd") : date.Replace("-", "");
 
+            string query = $@"
+        SELECT 
+            f_prescriptionnohis,
+            f_seq,
+            f_seqmax,
+            f_prescriptiondate,
+            f_patientname,
+            f_hn,
+            f_orderitemnameTH,
+            f_orderqty,
+            f_orderunitdesc,
+            f_dosagedispense,
+            f_dispensestatus_conhis,
+            f_remark
+        FROM tb_thaneshosp_middle
+        WHERE SUBSTRING(f_prescriptiondate, 1, 8) = @QueryDate
+        AND f_dispensestatus_conhis IN ('1', '3')
+        ORDER BY f_prescriptionnohis, f_seq";
+
+            _logger?.LogInfo($"📥 Loading grid data for date: {queryDate}");
+
+            try
+            {
+                using (var connection = new MySqlConnection(_connectionString))
+                {
+                    await connection.OpenAsync();
+
+                    using (var command = new MySqlCommand(query, connection))
+                    {
+                        command.Parameters.AddWithValue("@QueryDate", queryDate);
+                        command.CommandTimeout = 30;
+
+                        using (var reader = await command.ExecuteReaderAsync())
+                        {
+                            while (await reader.ReadAsync())
+                            {
+                                try
+                                {
+                                    var status = reader["f_dispensestatus_conhis"]?.ToString() ?? "";
+
+                                    var item = new GridViewDataModel
+                                    {
+                                        PrescriptionNo = reader["f_prescriptionnohis"]?.ToString() ?? "",
+                                        Seq = reader["f_seq"]?.ToString() ?? "",
+                                        SeqMax = reader["f_seqmax"]?.ToString() ?? "",
+                                        PatientName = reader["f_patientname"]?.ToString() ?? "",
+                                        HN = reader["f_hn"]?.ToString() ?? "",
+                                        ItemNameTH = reader["f_orderitemnameTH"]?.ToString() ?? "",
+                                        OrderQty = reader["f_orderqty"]?.ToString() ?? "",
+                                        OrderUnit = reader["f_orderunitdesc"]?.ToString() ?? "",
+                                        Dosage = reader["f_dosagedispense"]?.ToString() ?? "",
+                                        Status = status,
+                                        Remark = reader["f_remark"]?.ToString() ?? ""
+                                    };
+
+                                    dataList.Add(item);
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger?.LogError("Error reading row for grid", ex);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                _logger?.LogInfo($"✅ Grid data loaded: {dataList.Count} records");
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError("Error loading grid data", ex);
+            }
+
+            return dataList;
+        }
         private string ExtractDate(string dateStr)
         {
             if (string.IsNullOrEmpty(dateStr))
@@ -505,5 +584,7 @@ namespace Interface_pattaya.Services
 
             return (type == 1 && value == 1) || (type == 2 && value == 2) ? "1" : "0";
         }
+
+       
     }
 }

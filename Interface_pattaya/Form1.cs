@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -6,6 +8,7 @@ using MySql.Data.MySqlClient;
 using Interface_pattaya.Configuration;
 using Interface_pattaya.Services;
 using Interface_pattaya.utils;
+using Interface_pattaya.Models;
 
 namespace Interface_pattaya
 {
@@ -75,6 +78,9 @@ namespace Interface_pattaya
 
                 // ✅ Check database immediately
                 Task.Delay(500).ContinueWith(_ => CheckDatabaseConnection());
+
+                // ✅ โหลดข้อมูล grid เมื่อ app เริ่มต้น
+                Task.Delay(2000).ContinueWith(_ => LoadDataGridViewAsync(DateTime.Now.ToString("yyyy-MM-dd")));
 
                 _logger.LogInfo("Application initialized successfully");
             }
@@ -359,6 +365,9 @@ namespace Interface_pattaya
                         totalCountLabel.Text = (successCount + failedCount).ToString();
                         successCountLabel.Text = successCount.ToString();
                         failedCountLabel.Text = failedCount.ToString();
+
+                        // โหลดข้อมูล grid ใหม่
+                        Task.Run(() => LoadDataGridViewAsync(DateTime.Now.ToString("yyyy-MM-dd")));
                     });
 
                     foreach (var error in errors)
@@ -386,35 +395,41 @@ namespace Interface_pattaya
             _logger?.LogInfo("ProcessDataLoop ended");
         }
 
-        private void SearchButton_Click(object sender, EventArgs e)
+        private async void SearchButton_Click(object sender, EventArgs e)
         {
             try
             {
                 string searchValue = searchTextBox.Text.Trim();
+                string selectedDate = dateTimePicker.Value.ToString("yyyy-MM-dd");
+
                 if (string.IsNullOrEmpty(searchValue))
                 {
+                    _logger?.LogWarning("Search: Empty search value");
                     ShowAutoClosingMessageBox("กรุณาป้อนเลขที่ใบสั่งหรือ HN", "ข้อมูลไม่ครบ");
                     return;
                 }
 
-                _logger?.LogInfo($"Search initiated for: {searchValue}");
+                _logger?.LogInfo($"Search initiated for: {searchValue}, Date: {selectedDate}");
+                await LoadDataGridViewAsync(selectedDate, searchValue);
             }
             catch (Exception ex)
             {
                 _logger?.LogError("Error in SearchButton_Click", ex);
+                ShowAutoClosingMessageBox($"ข้อผิดพลาด: {ex.Message}", "ข้อผิดพลาด");
             }
         }
 
-        private void RefreshButton_Click(object sender, EventArgs e)
+        private async void RefreshButton_Click(object sender, EventArgs e)
         {
             try
             {
                 _logger?.LogInfo("Refresh button clicked");
-                // ✅ Implement refresh logic if needed
+                await LoadDataGridViewAsync(dateTimePicker.Value.ToString("yyyy-MM-dd"));
             }
             catch (Exception ex)
             {
                 _logger?.LogError("Error in RefreshButton_Click", ex);
+                ShowAutoClosingMessageBox($"ข้อผิดพลาด: {ex.Message}", "ข้อผิดพลาด");
             }
         }
 
@@ -428,6 +443,220 @@ namespace Interface_pattaya
             catch (Exception ex)
             {
                 _logger?.LogError("Error in SettingsButton_Click", ex);
+            }
+        }
+
+        private async Task LoadDataGridViewAsync(string date = "", string searchValue = "")
+        {
+            try
+            {
+                _logger?.LogInfo($"Loading grid data - Date: {date}, Search: {searchValue}");
+
+                if (_dataService == null)
+                {
+                    _logger?.LogWarning("DataService is not initialized");
+                    return;
+                }
+
+                // ✅ ตั้งค่า UI ให้เป็นสถานะโหลด
+                if (this.InvokeRequired)
+                {
+                    this.Invoke((MethodInvoker)delegate
+                    {
+                        dataGridView.DataSource = null;
+                        statusLabel.Text = "Status: ⏳ Loading data...";
+                    });
+                }
+
+                string queryDate = string.IsNullOrEmpty(date)
+                    ? DateTime.Now.ToString("yyyy-MM-dd")
+                    : date;
+
+                var data = await _dataService.GetPrescriptionDataAsync(queryDate);
+
+                // ถ้ามีการค้นหา ให้ filter เพิ่มเติม
+                if (!string.IsNullOrEmpty(searchValue))
+                {
+                    data = data.Where(d =>
+                        (!string.IsNullOrEmpty(d.PrescriptionNo) && d.PrescriptionNo.Contains(searchValue)) ||
+                        (!string.IsNullOrEmpty(d.HN) && d.HN.Contains(searchValue))
+                    ).ToList();
+
+                    _logger?.LogInfo($"Filter applied: Found {data.Count} matching records");
+                }
+
+                // ✅ Update UI บน Thread ที่ถูกต้อง
+                if (this.InvokeRequired)
+                {
+                    this.Invoke((MethodInvoker)delegate
+                    {
+                        // Clear existing columns
+                        dataGridView.DataSource = null;
+                        dataGridView.Columns.Clear();
+
+                        // Bind data
+                        dataGridView.DataSource = data;
+
+                        // Configure columns
+                        ConfigureDataGridViewColumns();
+
+                        // Apply formatting
+                        ApplyDataGridViewFormatting(data);
+
+                        // Update status
+                        statusLabel.Text = _isServiceRunning ? "Status: ▶ Running" : "Status: ⏹ Stopped";
+
+                        _logger?.LogInfo($"Grid loaded with {data.Count} rows");
+                    });
+                }
+                else
+                {
+                    // Clear existing columns
+                    dataGridView.DataSource = null;
+                    dataGridView.Columns.Clear();
+
+                    // Bind data
+                    dataGridView.DataSource = data;
+
+                    // Configure columns
+                    ConfigureDataGridViewColumns();
+
+                    // Apply formatting
+                    ApplyDataGridViewFormatting(data);
+
+                    _logger?.LogInfo($"Grid loaded with {data.Count} rows");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError("Error loading DataGridView", ex);
+
+                if (this.InvokeRequired)
+                {
+                    this.Invoke((MethodInvoker)delegate
+                    {
+                        ShowAutoClosingMessageBox($"ข้อผิดพลาดในการโหลดข้อมูล: {ex.Message}", "ข้อผิดพลาด");
+                    });
+                }
+                else
+                {
+                    ShowAutoClosingMessageBox($"ข้อผิดพลาดในการโหลดข้อมูล: {ex.Message}", "ข้อผิดพลาด");
+                }
+            }
+        }
+
+        private void ConfigureDataGridViewColumns()
+        {
+            try
+            {
+                if (dataGridView.Columns.Count == 0) return;
+
+                var columnMappings = new Dictionary<string, (string HeaderText, int Width)>
+                {
+                    { "PrescriptionNo", ("เลขที่ใบสั่ง", 120) },
+                    { "Seq", ("ที่", 40) },
+                    { "SeqMax", ("Max", 40) },
+                    { "PatientName", ("ชื่อผู้ป่วย", 150) },
+                    { "HN", ("HN", 100) },
+                    { "ItemNameTH", ("ชื่อยา", 200) },
+                    { "OrderQty", ("จำนวน", 60) },
+                    { "OrderUnit", ("หน่วย", 70) },
+                    { "Dosage", ("วิธีใช้", 100) },
+                    { "Status", ("สถานะ", 80) },
+                    { "Remark", ("หมายเหตุ", 150) }
+                };
+
+                foreach (DataGridViewColumn col in dataGridView.Columns)
+                {
+                    if (columnMappings.TryGetValue(col.Name, out var mapping))
+                    {
+                        col.HeaderText = mapping.HeaderText;
+                        col.Width = mapping.Width;
+                    }
+
+                    // ตั้งให้คอลัมน์ Status แสดงในตรงกลาง
+                    if (col.Name == "Status")
+                    {
+                        col.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+                    }
+                }
+
+                dataGridView.AutoResizeColumns(DataGridViewAutoSizeColumnsMode.DisplayedCells);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError("Error configuring columns", ex);
+            }
+        }
+
+        private void ApplyDataGridViewFormatting(List<GridViewDataModel>  data)
+        {
+            try
+            {
+                foreach (DataGridViewRow row in dataGridView.Rows)
+                {
+                    try
+                    {
+                        if (row.DataBoundItem is GridViewDataModel item)
+                        {
+                            var statusCell = row.Cells["Status"];
+
+                            if (statusCell != null)
+                            {
+                                string status = item?.Status?.ToString() ?? "";
+
+                                if (status == "1")
+                                {
+                                    // สำเร็จ - สีเขียว
+                                    statusCell.Style.BackColor = System.Drawing.Color.LightGreen;
+                                    statusCell.Style.ForeColor = System.Drawing.Color.DarkGreen;
+                                    statusCell.Value = "✅ สำเร็จ";
+
+                                    // ทำให้ text หนา
+                                    statusCell.Style.Font = new System.Drawing.Font(
+                                        dataGridView.Font.FontFamily,
+                                        dataGridView.Font.Size,
+                                        System.Drawing.FontStyle.Bold
+                                    );
+
+                                    row.Visible = true;
+                                }
+                                else if (status == "3")
+                                {
+                                    // ล้มเหลว - สีแดง
+                                    statusCell.Style.BackColor = System.Drawing.Color.LightCoral;
+                                    statusCell.Style.ForeColor = System.Drawing.Color.DarkRed;
+                                    statusCell.Value = "❌ ล้มเหลว";
+
+                                    // ทำให้ text หนา
+                                    statusCell.Style.Font = new System.Drawing.Font(
+                                        dataGridView.Font.FontFamily,
+                                        dataGridView.Font.Size,
+                                        System.Drawing.FontStyle.Bold
+                                    );
+
+                                    row.Visible = true;
+                                }
+                                else
+                                {
+                                    // สถานะอื่น - ซ่อนแถว
+                                    row.Visible = false;
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger?.LogError($"Error formatting row {row.Index}: {ex.Message}", ex);
+                    }
+                }
+
+                dataGridView.Refresh();
+                _logger?.LogInfo("DataGridView formatting applied successfully");
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError("Error applying formatting", ex);
             }
         }
 
@@ -495,7 +724,7 @@ namespace Interface_pattaya
                 {
                     _logger?.LogInfo("Stopping service");
                     StopService();
-                    Thread.Sleep(1000); // ✅ Wait for service to stop
+                    Thread.Sleep(1000);
                 }
 
                 _connectionCheckTimer?.Stop();

@@ -86,4 +86,19 @@ namespace Interface_pattaya.Models
     {
         public PrescriptionBodyRequest[] data { get; set; }
     }
+
+    public class GridViewDataModel
+    {
+        public string PrescriptionNo { get; set; }
+        public string Seq { get; set; }
+        public string SeqMax { get; set; }
+        public string PatientName { get; set; }
+        public string HN { get; set; }
+        public string ItemNameTH { get; set; }
+        public string OrderQty { get; set; }
+        public string OrderUnit { get; set; }
+        public string Dosage { get; set; }
+        public string Status { get; set; }
+        public string Remark { get; set; }
+    }
 }
