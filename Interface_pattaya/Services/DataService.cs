@@ -293,11 +293,14 @@ namespace Interface_pattaya.Services
                 var json = JsonSerializer.Serialize(body, new JsonSerializerOptions
                 {
                     PropertyNamingPolicy = null,
-                    WriteIndented = false
+                    WriteIndented = true  // ← เปลี่ยนเป็น true เพื่อให้ readable ในไฟล์ log
                 });
 
                 _logger?.LogInfo($"📤 Sending API request to: {_apiUrl}");
                 _logger?.LogInfo($"Payload size: {json.Length} bytes");
+
+                // ✅ เก็บค่า data ที่จะส่ง API ในไฟล์ log
+                _logger?.LogInfo($"📋 API Request Payload:\n{json}");
 
                 var content = new StringContent(json, Encoding.UTF8, "application/json");
                 var response = await _httpClient.PostAsync(_apiUrl, content);
@@ -306,6 +309,10 @@ namespace Interface_pattaya.Services
                 {
                     var responseContent = await response.Content.ReadAsStringAsync();
                     _logger?.LogInfo($"✓ API Response (200): {responseContent.Substring(0, Math.Min(200, responseContent.Length))}");
+
+                    // ✅ เก็บ response ทั้งหมด
+                    _logger?.LogInfo($"📊 Full API Response:\n{responseContent}");
+
                     return (true, responseContent);
                 }
                 else
@@ -314,6 +321,10 @@ namespace Interface_pattaya.Services
                     var errorMsg = $"API Error {(int)response.StatusCode}: {response.ReasonPhrase}";
                     _logger?.LogWarning($"❌ {errorMsg}");
                     _logger?.LogWarning($"Response: {errorContent.Substring(0, Math.Min(500, errorContent.Length))}");
+
+                    // ✅ เก็บ error response ทั้งหมด
+                    _logger?.LogWarning($"📊 Full Error Response:\n{errorContent}");
+
                     return (false, errorMsg);
                 }
             }
