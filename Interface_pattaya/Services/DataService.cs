@@ -145,17 +145,6 @@ namespace Interface_pattaya.Services
                                     var freetext1Parts = freetext1.Split('^');
                                     var freetext2Parts = freetext2.Split('^');
 
-                               
-
-                                    var orderCreateDate = CombineDateTime(
-                                        reader["f_ordercreatedate"]?.ToString(),
-                                        reader["f_ordercreatetime"]?.ToString()
-                                    );
-                                    var orderAcceptDate = CombineDateTime(
-                                        reader["f_orderacceptdate"]?.ToString(),
-                                        reader["f_orderaccepttime"]?.ToString()
-                                    );
-
                                     var sex = ProcessSex(reader["f_sex"]?.ToString());
 
                                     var prnValue = reader["f_PRN"]?.ToString();
@@ -169,13 +158,13 @@ namespace Interface_pattaya.Services
                                         f_seq = int.TryParse(seq, out int seqVal) ? seqVal : 0,
                                         f_seqmax = int.TryParse(reader["f_seqmax"]?.ToString(), out int seqmax) ? seqmax : 0,
                                         f_prescriptiondate = prescriptionDateFormatted,
-                                        f_ordercreatedate = orderCreateDate,
+                                        f_ordercreatedate = reader["f_ordercreatedate"]?.ToString() + " " + reader["f_ordercreatetime"]?.ToString(),
                                         f_ordertargetdate = reader["f_ordertargetdate"]?.ToString(),
                                         f_ordertargettime = reader["f_ordertargettime"]?.ToString(),
                                         f_doctorcode = reader["f_doctorcode"]?.ToString(),
                                         f_doctorname = reader["f_doctorname"]?.ToString(),
                                         f_useracceptby = reader["f_useracceptby"]?.ToString(),
-                                        f_orderacceptdate = orderAcceptDate,
+                                        f_orderacceptdate = reader["f_orderacceptdate"]?.ToString()+" " + reader["f_orderaccepttime"]?.ToString(),
                                         f_orderacceptfromip = reader["f_orderacceptfromip"]?.ToString(),
                                         f_pharmacylocationcode = reader["f_pharmacylocationpackcode"]?.ToString(),
                                         f_pharmacylocationdesc = reader["f_pharmacylocationpackdesc"]?.ToString(),
@@ -549,30 +538,7 @@ namespace Interface_pattaya.Services
             return dateStr;
         }
 
-        private string CombineDateTime(string dateStr, string timeStr)
-        {
-            if (string.IsNullOrEmpty(dateStr) || string.IsNullOrEmpty(timeStr))
-                return "";
-
-            try
-            {
-                if (dateStr.Length < 8 || timeStr.Length < 4)
-                    return $"{dateStr} {timeStr}";
-
-                string year = dateStr.Substring(0, 4);
-                string month = dateStr.Substring(4, 2);
-                string day = dateStr.Substring(6, 2);
-                string hour = timeStr.Substring(0, 2);
-                string minute = timeStr.Substring(2, 2);
-                string second = timeStr.Length >= 6 ? timeStr.Substring(4, 2) : "00";
-
-                return $"{year}-{month}-{day} {hour}:{minute}:{second}";
-            }
-            catch
-            {
-                return $"{dateStr} {timeStr}";
-            }
-        }
+      
 
         private string ProcessSex(string sex)
         {
