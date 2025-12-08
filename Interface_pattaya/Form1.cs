@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -22,6 +23,11 @@ namespace Interface_pattaya
         private CancellationTokenSource _cancellationTokenSource;
         private System.Windows.Forms.Timer _connectionCheckTimer;
         private System.Windows.Forms.Timer _autoMessageBoxTimer;
+
+        // ⭐ DataTable & DataView for better filtering/sorting
+        private DataTable _processedDataTable;
+        private DataView _filteredDataView;
+        private string _currentStatusFilter = "All";
 
         public Form1()
         {
@@ -61,9 +67,11 @@ namespace Interface_pattaya
                     _logger.LogInfo(_appConfig.GetConfigurationSummary());
                 }
 
+                // ⭐ Initialize DataTable
+                InitializeDataTable();
+
                 UpdateUIState();
 
-                // ✅ START CONNECTION CHECK TIMER
                 _connectionCheckTimer = new System.Windows.Forms.Timer();
                 _connectionCheckTimer.Interval = 3000;
                 _connectionCheckTimer.Tick += ConnectionCheckTimer_Tick;
@@ -71,10 +79,8 @@ namespace Interface_pattaya
 
                 _logger.LogInfo("Connection check timer started");
 
-                // ✅ CHECK DATABASE IMMEDIATELY
                 Task.Delay(500).ContinueWith(_ => CheckDatabaseConnection());
 
-                // ✅ FIX: LOAD INITIAL DATA PROPERLY WITH AWAIT
                 _ = LoadInitialDataAsync();
 
                 _logger.LogInfo("Application initialized successfully");
@@ -86,13 +92,210 @@ namespace Interface_pattaya
             }
         }
 
-        // ✅ NEW METHOD: LOAD INITIAL DATA WITH PROPER ASYNC/AWAIT
+        // ⭐ Initialize DataTable with columns
+        private void InitializeDataTable()
+        {
+            try
+            {
+                _processedDataTable = new DataTable();
+                _processedDataTable.Columns.Add("Time Check", typeof(string));
+                _processedDataTable.Columns.Add("Transaction DateTime", typeof(string));
+                _processedDataTable.Columns.Add("Order No", typeof(string));
+                _processedDataTable.Columns.Add("HN", typeof(string));
+                _processedDataTable.Columns.Add("Patient Name", typeof(string));
+                _processedDataTable.Columns.Add("Status", typeof(string));
+
+                _filteredDataView = new DataView(_processedDataTable);
+
+                if (dataGridView != null)
+                {
+                    dataGridView.DataSource = _filteredDataView;
+
+                    // Set column widths
+                    dataGridView.Columns["Time Check"].Width = 165;
+                    dataGridView.Columns["Transaction DateTime"].Width = 165;
+                    dataGridView.Columns["Order No"].Width = 120;
+                    dataGridView.Columns["HN"].Width = 90;
+                    dataGridView.Columns["Patient Name"].Width = 180;
+                    dataGridView.Columns["Status"].Width = 100;
+
+                    // Setup cell formatting event
+                    dataGridView.CellFormatting += DataGridView_CellFormatting;
+                }
+
+                // ⭐ Initialize Panel Click Filters
+                InitializePanelFilters();
+
+                _logger?.LogInfo("DataTable initialized successfully");
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError("Error initializing DataTable", ex);
+            }
+        }
+
+        // ⭐ Initialize Panel Click Events for Filtering
+        private void InitializePanelFilters()
+        {
+            try
+            {
+                totalPanel.Click += TotalPanel_Click;
+                successPanel.Click += SuccessPanel_Click;
+                failedPanel.Click += FailedPanel_Click;
+
+                foreach (Control ctrl in totalPanel.Controls)
+                {
+                    if (ctrl is Label)
+                    {
+                        ctrl.Click += TotalPanel_Click;
+                        ctrl.Cursor = Cursors.Hand;
+                    }
+                }
+                foreach (Control ctrl in successPanel.Controls)
+                {
+                    if (ctrl is Label)
+                    {
+                        ctrl.Click += SuccessPanel_Click;
+                        ctrl.Cursor = Cursors.Hand;
+                    }
+                }
+                foreach (Control ctrl in failedPanel.Controls)
+                {
+                    if (ctrl is Label)
+                    {
+                        ctrl.Click += FailedPanel_Click;
+                        ctrl.Cursor = Cursors.Hand;
+                    }
+                }
+
+                totalPanel.Cursor = Cursors.Hand;
+                successPanel.Cursor = Cursors.Hand;
+                failedPanel.Cursor = Cursors.Hand;
+
+                _logger?.LogInfo("Panel filters initialized");
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError("Error initializing panel filters", ex);
+            }
+        }
+
+        // ⭐ Panel Click Handlers for Status Filtering
+        private void TotalPanel_Click(object sender, EventArgs e)
+        {
+            _currentStatusFilter = "All";
+            ApplyStatusFilter();
+        }
+
+        private void SuccessPanel_Click(object sender, EventArgs e)
+        {
+            _currentStatusFilter = "Success";
+            ApplyStatusFilter();
+        }
+
+        private void FailedPanel_Click(object sender, EventArgs e)
+        {
+            _currentStatusFilter = "Failed";
+            ApplyStatusFilter();
+        }
+
+        // ⭐ Apply Status Filter using DataView
+        private void ApplyStatusFilter()
+        {
+            try
+            {
+                if (_filteredDataView == null) return;
+
+                if (_currentStatusFilter == "All")
+                {
+                    _filteredDataView.RowFilter = string.Empty;
+                }
+                else
+                {
+                    _filteredDataView.RowFilter = $"[Status] = '{_currentStatusFilter}'";
+                }
+
+                UpdateStatusFilterUI();
+                UpdateSummaryCounts();
+
+                _logger?.LogInfo($"Filter applied: {_currentStatusFilter}");
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError("Error applying status filter", ex);
+            }
+        }
+
+        // ⭐ Update Panel Border Style to show selected filter
+        private void UpdateStatusFilterUI()
+        {
+            try
+            {
+                totalPanel.BorderStyle = (_currentStatusFilter == "All")
+                    ? BorderStyle.Fixed3D
+                    : BorderStyle.FixedSingle;
+
+                successPanel.BorderStyle = (_currentStatusFilter == "Success")
+                    ? BorderStyle.Fixed3D
+                    : BorderStyle.FixedSingle;
+
+                failedPanel.BorderStyle = (_currentStatusFilter == "Failed")
+                    ? BorderStyle.Fixed3D
+                    : BorderStyle.FixedSingle;
+
+                totalPanel.Invalidate();
+                successPanel.Invalidate();
+                failedPanel.Invalidate();
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError("Error updating filter UI", ex);
+            }
+        }
+
+        // ⭐ DataGridView Cell Formatting for Colors
+        private void DataGridView_CellFormatting(object sender, DataGridViewCellFormattingEventArgs e)
+        {
+            try
+            {
+                if (e.RowIndex >= 0 && e.RowIndex < dataGridView.Rows.Count)
+                {
+                    var row = dataGridView.Rows[e.RowIndex];
+
+                    if (row.Cells["Status"].Value != null)
+                    {
+                        string status = row.Cells["Status"].Value.ToString();
+
+                        if (status == "Success")
+                        {
+                            row.DefaultCellStyle.BackColor = System.Drawing.Color.LightGreen;
+                            row.DefaultCellStyle.SelectionBackColor = System.Drawing.Color.Green;
+                        }
+                        else if (status == "Failed")
+                        {
+                            row.DefaultCellStyle.BackColor = System.Drawing.Color.LightCoral;
+                            row.DefaultCellStyle.SelectionBackColor = System.Drawing.Color.Red;
+                        }
+                        else
+                        {
+                            row.DefaultCellStyle.BackColor = System.Drawing.Color.White;
+                            row.DefaultCellStyle.SelectionBackColor = System.Drawing.SystemColors.Highlight;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError("Error in cell formatting", ex);
+            }
+        }
+
         private async Task LoadInitialDataAsync()
         {
             try
             {
                 _logger?.LogInfo("⏳ Loading initial data...");
-                await Task.Delay(2000); // รอให้ connection และ database พร้อม
+                await Task.Delay(2000);
                 await LoadDataGridViewAsync(DateTime.Now.ToString("yyyy-MM-dd"));
                 _logger?.LogInfo("✅ Initial data loaded successfully");
             }
@@ -166,7 +369,7 @@ namespace Interface_pattaya
                 }
                 catch (Exception ex)
                 {
-                    _logger?.LogWarning($"❌ Unexpected error in CheckDatabaseConnection: {ex.Message}");
+                    _logger?.LogWarning($"❌ Unexpected error: {ex.Message}");
 
                     if (_isDatabaseConnected)
                     {
@@ -178,10 +381,6 @@ namespace Interface_pattaya
                             {
                                 UpdateDatabaseDisconnectedUI();
                             });
-                        }
-                        else
-                        {
-                            UpdateDatabaseDisconnectedUI();
                         }
                     }
                 }
@@ -241,7 +440,7 @@ namespace Interface_pattaya
                     ? "Status: ▶ Running"
                     : "Status: ⏹ Stopped";
 
-                _logger?.LogInfo($"UI State Updated - DB Connected: {_isDatabaseConnected}, Service Running: {_isServiceRunning}");
+                _logger?.LogInfo($"UI State Updated - DB: {_isDatabaseConnected}, Running: {_isServiceRunning}");
             }
             catch (Exception ex)
             {
@@ -256,7 +455,7 @@ namespace Interface_pattaya
                 if (!_isDatabaseConnected)
                 {
                     _logger?.LogWarning("Cannot start - database not connected");
-                    ShowAutoClosingMessageBox("ไม่สามารถเชื่อมต่อฐานข้อมูล กรุณารอสักครู่", "ข้อผิดพลาด");
+                    ShowAutoClosingMessageBox("ไม่สามารถเชื่อมต่อฐานข้อมูล", "ข้อผิดพลาด");
                     return;
                 }
 
@@ -282,23 +481,9 @@ namespace Interface_pattaya
         {
             try
             {
-                if (_isServiceRunning)
-                {
-                    _logger?.LogWarning("Service is already running");
-                    return;
-                }
-
-                if (!_isDatabaseConnected)
-                {
-                    _logger?.LogWarning("Cannot start service - database not connected");
-                    return;
-                }
-
-                if (_dataService == null)
-                {
-                    _logger?.LogError("DataService is not initialized");
-                    return;
-                }
+                if (_isServiceRunning) return;
+                if (!_isDatabaseConnected) return;
+                if (_dataService == null) return;
 
                 _isServiceRunning = true;
                 _cancellationTokenSource = new CancellationTokenSource();
@@ -373,10 +558,6 @@ namespace Interface_pattaya
                             lastFoundLabel.Text = $"Last Found: {successCount + failedCount} items";
                         }
 
-                        totalCountLabel.Text = (successCount + failedCount).ToString();
-                        successCountLabel.Text = successCount.ToString();
-                        failedCountLabel.Text = failedCount.ToString();
-
                         Task.Run(() => LoadDataGridViewAsync(DateTime.Now.ToString("yyyy-MM-dd")));
                     });
 
@@ -409,18 +590,9 @@ namespace Interface_pattaya
         {
             try
             {
-                string searchValue = searchTextBox.Text.Trim();
                 string selectedDate = dateTimePicker.Value.ToString("yyyy-MM-dd");
-
-                if (string.IsNullOrEmpty(searchValue))
-                {
-                    _logger?.LogWarning("Search: Empty search value");
-                    ShowAutoClosingMessageBox("กรุณาป้อนเลขที่ใบสั่งหรือ HN", "ข้อมูลไม่ครบ");
-                    return;
-                }
-
-                _logger?.LogInfo($"Search initiated for: {searchValue}, Date: {selectedDate}");
-                await LoadDataGridViewAsync(selectedDate, searchValue);
+                _logger?.LogInfo($"Search initiated - Date: {selectedDate}");
+                await LoadDataGridViewAsync(selectedDate);
             }
             catch (Exception ex)
             {
@@ -434,6 +606,7 @@ namespace Interface_pattaya
             try
             {
                 _logger?.LogInfo("Refresh button clicked");
+                _currentStatusFilter = "All";
                 await LoadDataGridViewAsync(dateTimePicker.Value.ToString("yyyy-MM-dd"));
             }
             catch (Exception ex)
@@ -455,15 +628,16 @@ namespace Interface_pattaya
             }
         }
 
-        private async Task LoadDataGridViewAsync(string date = "", string searchValue = "")
+        // ⭐ Load Data and Add to DataTable
+        private async Task LoadDataGridViewAsync(string date = "")
         {
             try
             {
                 string queryDate = string.IsNullOrEmpty(date)
-          ? DateTime.Now.ToString("yyyyMMdd")
-          : date.Replace("-", "");
-                _logger?.LogInfo($"queryDate{queryDate}");
-                _logger?.LogInfo($"Loading grid data - Date: {date}, Search: {searchValue}");
+                    ? DateTime.Now.ToString("yyyyMMdd")
+                    : date.Replace("-", "");
+
+                _logger?.LogInfo($"Loading grid data - Date: {date}");
 
                 if (_dataService == null)
                 {
@@ -475,51 +649,36 @@ namespace Interface_pattaya
                 {
                     this.Invoke((MethodInvoker)delegate
                     {
-                        dataGridView.DataSource = null;
                         statusLabel.Text = "Status: ⏳ Loading data...";
                     });
                 }
 
-     
-
                 var data = await _dataService.GetPrescriptionDataAsync(queryDate);
-
-                if (!string.IsNullOrEmpty(searchValue))
-                {
-                    data = data.Where(d =>
-                        (!string.IsNullOrEmpty(d.PrescriptionNo) && d.PrescriptionNo.Contains(searchValue)) ||
-                        (!string.IsNullOrEmpty(d.HN) && d.HN.Contains(searchValue))
-                    ).ToList();
-
-                    _logger?.LogInfo($"Filter applied: Found {data.Count} matching records");
-                }
 
                 if (this.InvokeRequired)
                 {
                     this.Invoke((MethodInvoker)delegate
                     {
-                        dataGridView.DataSource = null;
-                        dataGridView.Columns.Clear();
-                        dataGridView.DataSource = data;
+                        _processedDataTable.Rows.Clear();
 
-                        ConfigureDataGridViewColumns();
-                        ApplyDataGridViewFormatting(data);
+                        foreach (var item in data)
+                        {
+                            _processedDataTable.Rows.Add(
+                                DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                                item.Prescriptiondate,
+                                item.PrescriptionNo,
+                                item.HN,
+                                item.PatientName,                          
+                                item.Status == "1" ? "Success" : (item.Status == "3" ? "Failed" : "Pending")
+                            );
+                        }
+
+                        _filteredDataView.Sort = "[Time Check] DESC";
+                        UpdateSummaryCounts();
 
                         statusLabel.Text = _isServiceRunning ? "Status: ▶ Running" : "Status: ⏹ Stopped";
-
                         _logger?.LogInfo($"Grid loaded with {data.Count} rows");
                     });
-                }
-                else
-                {
-                    dataGridView.DataSource = null;
-                    dataGridView.Columns.Clear();
-                    dataGridView.DataSource = data;
-
-                    ConfigureDataGridViewColumns();
-                    ApplyDataGridViewFormatting(data);
-
-                    _logger?.LogInfo($"Grid loaded with {data.Count} rows");
                 }
             }
             catch (Exception ex)
@@ -530,118 +689,37 @@ namespace Interface_pattaya
                 {
                     this.Invoke((MethodInvoker)delegate
                     {
-                        ShowAutoClosingMessageBox($"ข้อผิดพลาดในการโหลดข้อมูล: {ex.Message}", "ข้อผิดพลาด");
+                        ShowAutoClosingMessageBox($"ข้อผิดพลาด: {ex.Message}", "ข้อผิดพลาด");
                     });
                 }
-                else
-                {
-                    ShowAutoClosingMessageBox($"ข้อผิดพลาดในการโหลดข้อมูล: {ex.Message}", "ข้อผิดพลาด");
-                }
             }
         }
 
-        private void ConfigureDataGridViewColumns()
+        // ⭐ Update Summary Counts from DataTable
+        private void UpdateSummaryCounts()
         {
             try
             {
-                if (dataGridView.Columns.Count == 0) return;
+                int totalCount = _processedDataTable.Rows.Count;
+                int successCount = 0;
+                int failedCount = 0;
 
-                var columnMappings = new Dictionary<string, (string HeaderText, int Width)>
+                foreach (DataRow row in _processedDataTable.Rows)
                 {
-                    { "PrescriptionNo", ("เลขที่ใบสั่ง", 120) },
-                    { "Seq", ("ที่", 40) },
-                    { "SeqMax", ("Max", 40) },
-                    { "PatientName", ("ชื่อผู้ป่วย", 150) },
-                    { "HN", ("HN", 100) },
-                    { "ItemNameTH", ("ชื่อยา", 200) },
-                    { "OrderQty", ("จำนวน", 60) },
-                    { "OrderUnit", ("หน่วย", 70) },
-                    { "Dosage", ("วิธีใช้", 100) },
-                    { "Status", ("สถานะ", 80) },
-                    { "Remark", ("หมายเหตุ", 150) }
-                };
-
-                foreach (DataGridViewColumn col in dataGridView.Columns)
-                {
-                    if (columnMappings.TryGetValue(col.Name, out var mapping))
-                    {
-                        col.HeaderText = mapping.HeaderText;
-                        col.Width = mapping.Width;
-                    }
-
-                    if (col.Name == "Status")
-                    {
-                        col.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
-                    }
+                    string status = row["Status"]?.ToString() ?? "";
+                    if (status == "Success") successCount++;
+                    else if (status == "Failed") failedCount++;
                 }
 
-                dataGridView.AutoResizeColumns(DataGridViewAutoSizeColumnsMode.DisplayedCells);
+                totalCountLabel.Text = totalCount.ToString();
+                successCountLabel.Text = successCount.ToString();
+                failedCountLabel.Text = failedCount.ToString();
+
+                _logger?.LogInfo($"Summary: Total={totalCount}, Success={successCount}, Failed={failedCount}");
             }
             catch (Exception ex)
             {
-                _logger?.LogError("Error configuring columns", ex);
-            }
-        }
-
-        private void ApplyDataGridViewFormatting(List<GridViewDataModel> data)
-        {
-            try
-            {
-                foreach (DataGridViewRow row in dataGridView.Rows)
-                {
-                    try
-                    {
-                        if (row.DataBoundItem is GridViewDataModel item)
-                        {
-                            var statusCell = row.Cells["Status"];
-
-                            if (statusCell != null)
-                            {
-                                string status = item?.Status?.ToString() ?? "";
-
-                                if (status == "1")
-                                {
-                                    statusCell.Style.BackColor = System.Drawing.Color.LightGreen;
-                                    statusCell.Style.ForeColor = System.Drawing.Color.DarkGreen;
-                                    statusCell.Value = "✅ สำเร็จ";
-                                    statusCell.Style.Font = new System.Drawing.Font(
-                                        dataGridView.Font.FontFamily,
-                                        dataGridView.Font.Size,
-                                        System.Drawing.FontStyle.Bold
-                                    );
-                                    row.Visible = true;
-                                }
-                                else if (status == "3")
-                                {
-                                    statusCell.Style.BackColor = System.Drawing.Color.LightCoral;
-                                    statusCell.Style.ForeColor = System.Drawing.Color.DarkRed;
-                                    statusCell.Value = "❌ ล้มเหลว";
-                                    statusCell.Style.Font = new System.Drawing.Font(
-                                        dataGridView.Font.FontFamily,
-                                        dataGridView.Font.Size,
-                                        System.Drawing.FontStyle.Bold
-                                    );
-                                    row.Visible = true;
-                                }
-                                else
-                                {
-                                    row.Visible = false;
-                                }
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger?.LogError($"Error formatting row {row.Index}: {ex.Message}", ex);
-                    }
-                }
-
-                dataGridView.Refresh();
-                _logger?.LogInfo("DataGridView formatting applied successfully");
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogError("Error applying formatting", ex);
+                _logger?.LogError("Error updating summary counts", ex);
             }
         }
 

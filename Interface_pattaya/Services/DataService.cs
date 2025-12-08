@@ -493,6 +493,7 @@ namespace Interface_pattaya.Services
                                         PrescriptionNo = reader["f_prescriptionnohis"]?.ToString() ?? "",
                                         Seq = reader["f_seq"]?.ToString() ?? "",
                                         SeqMax = reader["f_seqmax"]?.ToString() ?? "",
+                                        Prescriptiondate = reader["f_prescriptiondate "]?.ToString() ?? "",
                                         PatientName = reader["f_patientname"]?.ToString() ?? "",
                                         HN = reader["f_hn"]?.ToString() ?? "",
                                         ItemNameTH = reader["f_orderitemnameTH"]?.ToString() ?? "",

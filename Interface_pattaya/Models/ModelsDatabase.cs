@@ -92,6 +92,7 @@ namespace Interface_pattaya.Models
         public string PrescriptionNo { get; set; }
         public string Seq { get; set; }
         public string SeqMax { get; set; }
+        public string Prescriptiondate { get; set; }
         public string PatientName { get; set; }
         public string HN { get; set; }
         public string ItemNameTH { get; set; }

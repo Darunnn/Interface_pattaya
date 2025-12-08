@@ -214,6 +214,7 @@
             totalPanel.Name = "totalPanel";
             totalPanel.Size = new Size(210, 69);
             totalPanel.TabIndex = 0;
+            this.totalPanel.Click += new System.EventHandler(this.TotalPanel_Click);
             // 
             // totalLabel
             // 
@@ -250,6 +251,7 @@
             successPanel.Name = "successPanel";
             successPanel.Size = new Size(210, 69);
             successPanel.TabIndex = 1;
+            this.successPanel.Click += new System.EventHandler(this.SuccessPanel_Click);
             // 
             // successLabel
             // 
@@ -286,6 +288,7 @@
             failedPanel.Name = "failedPanel";
             failedPanel.Size = new Size(210, 69);
             failedPanel.TabIndex = 2;
+            this.failedPanel.Click += new System.EventHandler(this.FailedPanel_Click);
             // 
             // failedLabel
             // 
