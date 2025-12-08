@@ -6,7 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Interface_pattaya.Models;
-using Microsoft.Extensions.Logging;
+using Interface_pattaya.utils;
 
 namespace Interface_pattaya.Services
 {
@@ -15,15 +15,17 @@ namespace Interface_pattaya.Services
         private readonly string _connectionString;
         private readonly string _apiUrl;
         private readonly HttpClient _httpClient;
-        private readonly ILogger<DataService> _logger;
+        private readonly LogManager _logger;
 
-        public DataService(string connectionString, string apiUrl, ILogger<DataService> logger = null)
+
+
+        public DataService(string connectionString, string apiUrl, LogManager logger = null)
         {
             _connectionString = connectionString;
             _apiUrl = apiUrl;
             _httpClient = new HttpClient();
             _httpClient.Timeout = TimeSpan.FromSeconds(30);
-            _logger = logger;
+            _logger = logger ?? new LogManager();
         }
 
         public async Task<(int success, int failed, List<string> errors)> ProcessAndSendDataAsync()
@@ -33,7 +35,9 @@ namespace Interface_pattaya.Services
             var errors = new List<string>();
             var currentDate = DateTime.Now.ToString("yyyyMMdd");
 
-            string query = @"
+            // Query ตามไดอะแกรม: ดึงข้อมูลที่ f_dispensestatus_conhis เป็น NULL หรือ '0'
+            // และวันที่ตรงกับวันนี้
+            string query = $@"
                 SELECT 
                     f_referenceCode,
                     f_prescriptionnohis,
@@ -91,19 +95,24 @@ namespace Interface_pattaya.Services
                     f_ipdpt_record_no,
                     f_status,
                     f_freetext2
-                FROM tb_thaneshosp_middle 
-                WHERE (IFNULL(f_dispensestatus_conhis, '0') = '0')
+                FROM tb_thaneshosp_middle
+                WHERE ISNULL(f_dispensestatus_conhis, '0') = '0'
                 AND SUBSTRING(f_prescriptiondate, 1, 8) = @CurrentDate
                 ORDER BY f_prescriptionnohis, f_seq";
+
+            _logger?.LogInfo($"📥 Starting to process prescriptions for date: {currentDate}");
 
             try
             {
                 using (var connection = new MySqlConnection(_connectionString))
                 {
                     await connection.OpenAsync();
+                    _logger?.LogInfo($"✓ Database connection opened");
+
                     using (var command = new MySqlCommand(query, connection))
                     {
                         command.Parameters.AddWithValue("@CurrentDate", currentDate);
+                        command.CommandTimeout = 60;
 
                         using (var reader = await command.ExecuteReaderAsync())
                         {
@@ -111,6 +120,12 @@ namespace Interface_pattaya.Services
                             {
                                 try
                                 {
+                                    var referenceCode = reader["f_referenceCode"]?.ToString();
+                                    var prescriptionNo = reader["f_prescriptionnohis"]?.ToString();
+                                    var seq = reader["f_seq"]?.ToString();
+
+                                    _logger?.LogInfo($"Processing: Ref={referenceCode}, Rx={prescriptionNo}, Seq={seq}");
+
                                     // ดึงข้อมูลดิบและประมวลผล
                                     var freetext2 = reader["f_freetext2"]?.ToString() ?? "";
                                     var freetext2Parts = freetext2.Split('^');
@@ -129,12 +144,19 @@ namespace Interface_pattaya.Services
                                     var prn = ProcessPRN(prnValue, 1);
                                     var stat = ProcessPRN(prnValue, 2);
 
-                                    // สร้าง body request
+                                    // Parse f_freetext1 (split ^ index 0=symptom, 1=durationtext, 2=dosagedispense_compare)
+                                    var freetext1 = reader["f_freetext1"]?.ToString() ?? "";
+                                    var freetext1Parts = freetext1.Split('^');
+                                    var symptom = freetext1Parts.Length > 0 ? freetext1Parts[0] : "";
+                                    var durationtext = freetext1Parts.Length > 1 ? freetext1Parts[1] : "";
+                                    var dosagedispense_compare = freetext1Parts.Length > 2 ? freetext1Parts[2] : "";
+
+                                    // สร้าง body request ตามโฟลเดอร์ข้อมูล
                                     var prescriptionBody = new PrescriptionBodyRequest
                                     {
-                                        UniqID = $"{reader["f_referenceCode"]?.ToString()}-{currentDate}",
-                                        f_prescriptionno = reader["f_prescriptionnohis"]?.ToString(),
-                                        f_seq = int.TryParse(reader["f_seq"]?.ToString(), out int seq) ? seq : 0,
+                                        UniqID = $"{referenceCode}-{currentDate}",
+                                        f_prescriptionno = prescriptionNo,
+                                        f_seq = int.TryParse(seq, out int seqVal) ? seqVal : 0,
                                         f_seqmax = int.TryParse(reader["f_seqmax"]?.ToString(), out int seqmax) ? seqmax : 0,
                                         f_prescriptiondate = prescriptionDate,
                                         f_ordercreatedate = orderCreateDate,
@@ -199,34 +221,48 @@ namespace Interface_pattaya.Services
                                         f_comment = reader["f_comment"]?.ToString(),
                                         f_tomachineno = int.TryParse(reader["f_tomachineno"]?.ToString(), out int machine) ? machine : 0,
                                         f_ipd_order_recordno = reader["f_ipdpt_record_no"]?.ToString(),
-                                        f_status = reader["f_status"]?.ToString()
+                                        f_status = reader["f_status"]?.ToString(),
+                                        f_remark = freetext2Parts.Length > 3 ? freetext2Parts[3] : "",
+                                        f_durationtext = durationtext,
+                                        f_symptom = symptom,
+                                        f_dosagedispense_compare = dosagedispense_compare
                                     };
 
-                                    // ส่ง API
+                                    // ส่ง API ตามไดอะแกรม
                                     var (success, message) = await SendToApiAsync(prescriptionBody);
 
                                     if (success)
                                     {
                                         successCount++;
-                                        _logger?.LogInformation($"✓ Success - Prescription: {prescriptionBody.f_prescriptionno}, Seq: {prescriptionBody.f_seq}");
-                                        _logger?.LogDebug($"Body: {JsonSerializer.Serialize(prescriptionBody)}");
-                                        await UpdateDispenseStatusAsync(reader["f_referenceCode"]?.ToString(), "1");
+                                        _logger?.LogInfo($"✅ API Success - Rx: {prescriptionNo}, Seq: {seq}");
+
+                                        // อัปเดต status เป็น 1 (สำเร็จ) ตามไดอะแกรม
+                                        await UpdateDispenseStatusAsync(prescriptionNo, prescriptionDate, "1");
+                                        _logger?.LogInfo($"✓ Status updated to 1 - Rx: {prescriptionNo}");
                                     }
                                     else
                                     {
                                         failedCount++;
-                                        _logger?.LogWarning($"✗ Failed - Prescription: {prescriptionBody.f_prescriptionno}, Seq: {prescriptionBody.f_seq}");
-                                        _logger?.LogDebug($"Body: {JsonSerializer.Serialize(prescriptionBody)}");
-                                        _logger?.LogError($"Error: {message}");
-                                        await UpdateDispenseStatusAsync(reader["f_referenceCode"]?.ToString(), "3");
-                                        errors.Add($"Prescription {reader["f_prescriptionnohis"]?.ToString()}: {message}");
+                                        _logger?.LogWarning($"❌ API Failed - Rx: {prescriptionNo}, Seq: {seq}");
+                                        _logger?.LogWarning($"Error Message: {message}");
+
+                                        // อัปเดต status เป็น 3 (ล้มเหลว) ตามไดอะแกรม
+                                        await UpdateDispenseStatusAsync(prescriptionNo, prescriptionDate, "3");
+                                        _logger?.LogInfo($"✓ Status updated to 3 - Rx: {prescriptionNo}");
+
+                                        errors.Add($"Prescription {prescriptionNo}: {message}");
                                     }
                                 }
                                 catch (Exception ex)
                                 {
                                     failedCount++;
-                                    _logger?.LogError($"✗ Processing Error - RefCode: {reader["f_referenceCode"]?.ToString()}, Error: {ex.Message}");
-                                    await UpdateDispenseStatusAsync(reader["f_referenceCode"]?.ToString(), "3");
+                                    var rxNo = reader["f_prescriptionnohis"]?.ToString();
+                                    var rxDate = reader["f_prescriptiondate"]?.ToString();
+                                    _logger?.LogError($"❌ Row Processing Error - Rx: {rxNo}", ex);
+
+                                    // อัปเดต status เป็น 3 แม้เกิด exception
+                                    await UpdateDispenseStatusAsync(rxNo, rxDate, "3");
+
                                     errors.Add($"Processing error: {ex.Message}");
                                 }
                             }
@@ -236,10 +272,11 @@ namespace Interface_pattaya.Services
             }
             catch (Exception ex)
             {
+                _logger?.LogError("❌ Critical Database Error", ex);
                 errors.Add($"Database error: {ex.Message}");
             }
 
-            _logger?.LogInformation($"📊 Summary - Success: {successCount}, Failed: {failedCount}, Total: {successCount + failedCount}");
+            _logger?.LogInfo($"📊 Processing Complete - Success: {successCount}, Failed: {failedCount}, Total: {successCount + failedCount}");
 
             return (successCount, failedCount, errors);
         }
@@ -259,33 +296,54 @@ namespace Interface_pattaya.Services
                     WriteIndented = false
                 });
 
+                _logger?.LogInfo($"📤 Sending API request to: {_apiUrl}");
+                _logger?.LogInfo($"Payload size: {json.Length} bytes");
+
                 var content = new StringContent(json, Encoding.UTF8, "application/json");
                 var response = await _httpClient.PostAsync(_apiUrl, content);
 
                 if (response.IsSuccessStatusCode)
                 {
                     var responseContent = await response.Content.ReadAsStringAsync();
+                    _logger?.LogInfo($"✓ API Response (200): {responseContent.Substring(0, Math.Min(200, responseContent.Length))}");
                     return (true, responseContent);
                 }
                 else
                 {
                     var errorContent = await response.Content.ReadAsStringAsync();
-                    return (false, $"API Error: {response.StatusCode} - {errorContent}");
+                    var errorMsg = $"API Error {(int)response.StatusCode}: {response.ReasonPhrase}";
+                    _logger?.LogWarning($"❌ {errorMsg}");
+                    _logger?.LogWarning($"Response: {errorContent.Substring(0, Math.Min(500, errorContent.Length))}");
+                    return (false, errorMsg);
                 }
+            }
+            catch (HttpRequestException ex)
+            {
+                _logger?.LogError("❌ HTTP Request Exception", ex);
+                return (false, $"HTTP Error: {ex.Message}");
             }
             catch (Exception ex)
             {
+                _logger?.LogError("❌ Unexpected Exception in SendToApiAsync", ex);
                 return (false, $"Exception: {ex.Message}");
             }
         }
 
-        private async Task UpdateDispenseStatusAsync(string referenceCode, string status)
+        private async Task UpdateDispenseStatusAsync(string prescriptionNo, string prescriptionDate, string status)
         {
+            if (string.IsNullOrEmpty(prescriptionNo) || string.IsNullOrEmpty(prescriptionDate))
+            {
+                _logger?.LogWarning("⚠️ Cannot update status - prescriptionNo or prescriptionDate is null or empty");
+                return;
+            }
+
+            // Query ตามไดอะแกรม: อัปเดต f_dispensestatus_conhis
             string query = @"
                 UPDATE tb_thaneshosp_middle 
                 SET f_dispensestatus_conhis = @Status,
                     f_dispense_datetime = NOW()
-                WHERE f_referenceCode = @ReferenceCode";
+                WHERE f_prescriptionnohis = @prescriptionnohis 
+                AND f_prescriptiondate = @prescriptiondate";
 
             try
             {
@@ -294,15 +352,28 @@ namespace Interface_pattaya.Services
                     await connection.OpenAsync();
                     using (var command = new MySqlCommand(query, connection))
                     {
-                        command.Parameters.AddWithValue("@ReferenceCode", referenceCode);
+                        command.Parameters.AddWithValue("@prescriptionnohis", prescriptionNo);
+                        command.Parameters.AddWithValue("@prescriptiondate", prescriptionDate);
                         command.Parameters.AddWithValue("@Status", status);
-                        await command.ExecuteNonQueryAsync();
+                        command.CommandTimeout = 30;
+
+                        int rowsAffected = await command.ExecuteNonQueryAsync();
+
+                        if (rowsAffected > 0)
+                        {
+                            _logger?.LogInfo($"✓ Database updated: Rx={prescriptionNo}, Date={prescriptionDate}, NewStatus={status}, Rows={rowsAffected}");
+                        }
+                        else
+                        {
+                            _logger?.LogWarning($"⚠️ No rows updated - Rx={prescriptionNo}, Date={prescriptionDate}");
+                        }
                     }
                 }
             }
             catch (Exception ex)
             {
-                throw new Exception($"Error updating dispense status: {ex.Message}", ex);
+                _logger?.LogError($"❌ Error updating dispense status for Rx={prescriptionNo}, Date={prescriptionDate}", ex);
+                throw;
             }
         }
 
