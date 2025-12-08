@@ -296,7 +296,7 @@ namespace Interface_pattaya
             {
                 _logger?.LogInfo("⏳ Loading initial data...");
                 await Task.Delay(2000);
-                await LoadDataGridViewAsync(DateTime.Now.ToString("yyyy-MM-dd"));
+                await LoadDataGridViewAsync(DateTime.Now.ToString("yyyy-MM-dd"), ""); // ส่ง "" เป็นค่าเริ่มต้น
                 _logger?.LogInfo("✅ Initial data loaded successfully");
             }
             catch (Exception ex)
@@ -591,13 +591,15 @@ namespace Interface_pattaya
             try
             {
                 string selectedDate = dateTimePicker.Value.ToString("yyyy-MM-dd");
-                _logger?.LogInfo($"🔍 Search initiated - Date: {selectedDate}");
+                string searchText = searchTextBox.Text.Trim(); // ดึงค่าจาก textbox
+
+                _logger?.LogInfo($"🔍 Search initiated - Date: {selectedDate}, Search: '{searchText}'");
 
                 // ⭐ เรียก debug ก่อน
                 await DebugDatabaseQuery(selectedDate);
 
-                // ⭐ แล้วโหลดข้อมูลตามปกติ
-                await LoadDataGridViewAsync(selectedDate);
+                // ⭐ แล้วโหลดข้อมูลพร้อมส่ง searchText
+                await LoadDataGridViewAsync(selectedDate, searchText);
             }
             catch (Exception ex)
             {
@@ -612,7 +614,11 @@ namespace Interface_pattaya
             {
                 _logger?.LogInfo("Refresh button clicked");
                 _currentStatusFilter = "All";
-                await LoadDataGridViewAsync(dateTimePicker.Value.ToString("yyyy-MM-dd"));
+
+                // ⭐ ล้าง searchTextBox ด้วย
+                searchTextBox.Clear();
+
+                await LoadDataGridViewAsync(dateTimePicker.Value.ToString("yyyy-MM-dd"), "");
             }
             catch (Exception ex)
             {
@@ -634,7 +640,7 @@ namespace Interface_pattaya
         }
 
         // ⭐ Load Data and Add to DataTable
-        private async Task LoadDataGridViewAsync(string date = "")
+        private async Task LoadDataGridViewAsync(string date = "", string searchText = "")
         {
             try
             {
@@ -642,7 +648,7 @@ namespace Interface_pattaya
                     ? DateTime.Now.ToString("yyyyMMdd")
                     : date.Replace("-", "");
 
-                _logger?.LogInfo($"🔍 [DEBUG] Loading grid data - Input date: '{date}', Query date: '{queryDate}'");
+                _logger?.LogInfo($"🔍 [DEBUG] Loading grid data - Input date: '{date}', Query date: '{queryDate}', Search: '{searchText}'");
 
                 if (_dataService == null)
                 {
@@ -663,8 +669,8 @@ namespace Interface_pattaya
                     statusLabel.Text = "Status: ⏳ Loading data...";
                 }
 
-                // ⭐ ดึงข้อมูลจากฐานข้อมูล
-                var data = await _dataService.GetPrescriptionDataAsync(queryDate);
+                // ⭐ ดึงข้อมูลจากฐานข้อมูล พร้อมส่ง searchText
+                var data = await _dataService.GetPrescriptionDataAsync(queryDate, searchText);
 
                 _logger?.LogInfo($"📊 [DEBUG] Retrieved {data.Count} records from database");
 

@@ -440,12 +440,13 @@ namespace Interface_pattaya.Services
             }
         }
 
-        public async Task<List<GridViewDataModel>> GetPrescriptionDataAsync(string date = "")
+        public async Task<List<GridViewDataModel>> GetPrescriptionDataAsync(string date = "", string searchText = "")
         {
             var dataList = new List<GridViewDataModel>();
             var queryDate = string.IsNullOrEmpty(date)
          ? DateTime.Now.ToString("yyyyMMdd")
          : date.Replace("-", "");
+            bool hasSearchText = !string.IsNullOrWhiteSpace(searchText);
 
             string query = $@"
                 SELECT 
@@ -461,11 +462,22 @@ namespace Interface_pattaya.Services
                     f_dosagedispense,
                     f_dispensestatus_conhis
                 FROM tb_thaneshosp_middle
-                WHERE SUBSTRING(f_prescriptiondate, 1, 8) = @QueryDate
-                AND f_dispensestatus_conhis IN ('1', '3')
-                ORDER BY f_prescriptionnohis, f_seq";
 
-            _logger?.LogInfo($"📥 Loading grid data for date: {queryDate}");
+                WHERE SUBSTRING(f_prescriptiondate, 1, 8) = @QueryDate
+             
+                     AND f_dispensestatus_conhis IN ('1', '3')";
+
+            if (hasSearchText)
+            {
+                query += @"
+        AND (f_hn LIKE @SearchText OR f_prescriptionnohis LIKE @SearchText)";
+            }
+
+            query += @"
+        ORDER BY f_prescriptionnohis, f_seq";
+
+            _logger?.LogInfo($"📥 Loading grid data for date: {queryDate}" +
+                      (hasSearchText ? $", Search: {searchText}" : ""));
 
             try
             {
@@ -476,6 +488,10 @@ namespace Interface_pattaya.Services
                     using (var command = new MySqlCommand(query, connection))
                     {
                         command.Parameters.AddWithValue("@QueryDate", queryDate);
+                        if (hasSearchText)
+                        {
+                            command.Parameters.AddWithValue("@SearchText", "%" + searchText.Trim() + "%");
+                        }
                         command.CommandTimeout = 30;
 
                         using (var reader = await command.ExecuteReaderAsync())
