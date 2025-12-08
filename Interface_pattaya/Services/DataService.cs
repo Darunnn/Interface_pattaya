@@ -17,8 +17,6 @@ namespace Interface_pattaya.Services
         private readonly HttpClient _httpClient;
         private readonly LogManager _logger;
 
-
-
         public DataService(string connectionString, string apiUrl, LogManager logger = null)
         {
             _connectionString = connectionString;
@@ -35,8 +33,7 @@ namespace Interface_pattaya.Services
             var errors = new List<string>();
             var currentDate = DateTime.Now.ToString("yyyyMMdd");
 
-            // Query ตามไดอะแกรม: ดึงข้อมูลที่ f_dispensestatus_conhis เป็น NULL หรือ '0'
-            // และวันที่ตรงกับวันนี้
+            // ✅ Fixed Query - ตรงกับ diagram และ actual database
             string query = $@"
                 SELECT 
                     f_referenceCode,
@@ -44,7 +41,7 @@ namespace Interface_pattaya.Services
                     f_seq,
                     f_seqmax,
                     f_prescriptiondate,
-                    f_ordercreatedte,
+                    f_ordercreatedate,
                     f_ordercreatetime,
                     f_ordertargetdate,
                     f_ordertargettime,
@@ -94,9 +91,10 @@ namespace Interface_pattaya.Services
                     f_tomachineno,
                     f_ipdpt_record_no,
                     f_status,
+                    f_freetext1,
                     f_freetext2
                 FROM tb_thaneshosp_middle
-                WHERE ISNULL(f_dispensestatus_conhis, '0') = '0'
+                WHERE ISNULL (f_dispensestatus_conhis) = '0'
                 AND SUBSTRING(f_prescriptiondate, 1, 8) = @CurrentDate
                 ORDER BY f_prescriptionnohis, f_seq";
 
@@ -120,45 +118,58 @@ namespace Interface_pattaya.Services
                             {
                                 try
                                 {
-                                    var referenceCode = reader["f_referenceCode"]?.ToString();
-                                    var prescriptionNo = reader["f_prescriptionnohis"]?.ToString();
-                                    var seq = reader["f_seq"]?.ToString();
+                                    var referenceCode = reader["f_referenceCode"]?.ToString() ?? "";
+                                    var prescriptionNo = reader["f_prescriptionnohis"]?.ToString() ?? "";
+                                    var seq = reader["f_seq"]?.ToString() ?? "0";
+                                    var prescriptionDate = reader["f_prescriptiondate"]?.ToString() ?? "";
+
+                                    if (string.IsNullOrEmpty(prescriptionNo))
+                                    {
+                                        _logger?.LogWarning("⚠️ Skipped: prescriptionNo is empty");
+                                        failedCount++;
+                                        continue;
+                                    }
 
                                     _logger?.LogInfo($"Processing: Ref={referenceCode}, Rx={prescriptionNo}, Seq={seq}");
 
-                                    // ดึงข้อมูลดิบและประมวลผล
+                                    // ✅ ดึง freetext fields
+                                    var freetext1 = reader["f_freetext1"]?.ToString() ?? "";
                                     var freetext2 = reader["f_freetext2"]?.ToString() ?? "";
+
+                                    var freetext1Parts = freetext1.Split('^');
                                     var freetext2Parts = freetext2.Split('^');
 
-                                    var prescriptionDate = ExtractDate(reader["f_prescriptiondate"]?.ToString());
+                                    var symptom = freetext1Parts.Length > 0 ? freetext1Parts[0] : "";
+                                    var durationtext = freetext1Parts.Length > 1 ? freetext1Parts[1] : "";
+                                    var dosagedispense_compare = freetext1Parts.Length > 2 ? freetext1Parts[2] : "";
+
+                                    // ✅ Date Processing
+                                    var prescriptionDateFormatted = ExtractDate(prescriptionDate);
                                     var orderCreateDate = CombineDateTime(
-                                        reader["f_ordercreatedte"]?.ToString(),
+                                        reader["f_ordercreatedate"]?.ToString(),
                                         reader["f_ordercreatetime"]?.ToString()
                                     );
                                     var orderAcceptDate = CombineDateTime(
                                         reader["f_orderacceptdate"]?.ToString(),
                                         reader["f_orderaccepttime"]?.ToString()
                                     );
+
+                                    // ✅ Sex Processing (0=M, 1=F)
                                     var sex = ProcessSex(reader["f_sex"]?.ToString());
+
+                                    // ✅ PRN/STAT Processing
                                     var prnValue = reader["f_PRN"]?.ToString();
                                     var prn = ProcessPRN(prnValue, 1);
                                     var stat = ProcessPRN(prnValue, 2);
 
-                                    // Parse f_freetext1 (split ^ index 0=symptom, 1=durationtext, 2=dosagedispense_compare)
-                                    var freetext1 = reader["f_freetext1"]?.ToString() ?? "";
-                                    var freetext1Parts = freetext1.Split('^');
-                                    var symptom = freetext1Parts.Length > 0 ? freetext1Parts[0] : "";
-                                    var durationtext = freetext1Parts.Length > 1 ? freetext1Parts[1] : "";
-                                    var dosagedispense_compare = freetext1Parts.Length > 2 ? freetext1Parts[2] : "";
-
-                                    // สร้าง body request ตามโฟลเดอร์ข้อมูล
+                                    // ✅ สร้าง body request
                                     var prescriptionBody = new PrescriptionBodyRequest
                                     {
                                         UniqID = $"{referenceCode}-{currentDate}",
                                         f_prescriptionno = prescriptionNo,
                                         f_seq = int.TryParse(seq, out int seqVal) ? seqVal : 0,
                                         f_seqmax = int.TryParse(reader["f_seqmax"]?.ToString(), out int seqmax) ? seqmax : 0,
-                                        f_prescriptiondate = prescriptionDate,
+                                        f_prescriptiondate = prescriptionDateFormatted,
                                         f_ordercreatedate = orderCreateDate,
                                         f_ordertargetdate = reader["f_ordertargetdate"]?.ToString(),
                                         f_ordertargettime = reader["f_ordertargettime"]?.ToString(),
@@ -228,16 +239,16 @@ namespace Interface_pattaya.Services
                                         f_dosagedispense_compare = dosagedispense_compare
                                     };
 
-                                    // ส่ง API ตามไดอะแกรม
-                                    var (success, message) = await SendToApiAsync(prescriptionBody);
+                                    // ✅ ส่ง API พร้อม Retry
+                                    var (success, message) = await SendToApiWithRetryAsync(prescriptionBody);
 
                                     if (success)
                                     {
                                         successCount++;
                                         _logger?.LogInfo($"✅ API Success - Rx: {prescriptionNo}, Seq: {seq}");
 
-                                        // อัปเดต status เป็น 1 (สำเร็จ) ตามไดอะแกรม
-                                        await UpdateDispenseStatusAsync(prescriptionNo, prescriptionDate, "1");
+                                        // ✅ อัปเดต status เป็น 1 (สำเร็จ)
+                                        await UpdateDispenseStatusAsync(prescriptionNo, prescriptionDateFormatted, "1");
                                         _logger?.LogInfo($"✓ Status updated to 1 - Rx: {prescriptionNo}");
                                     }
                                     else
@@ -246,8 +257,8 @@ namespace Interface_pattaya.Services
                                         _logger?.LogWarning($"❌ API Failed - Rx: {prescriptionNo}, Seq: {seq}");
                                         _logger?.LogWarning($"Error Message: {message}");
 
-                                        // อัปเดต status เป็น 3 (ล้มเหลว) ตามไดอะแกรม
-                                        await UpdateDispenseStatusAsync(prescriptionNo, prescriptionDate, "3");
+                                        // ✅ อัปเดต status เป็น 3 (ล้มเหลว)
+                                        await UpdateDispenseStatusAsync(prescriptionNo, prescriptionDateFormatted, "3");
                                         _logger?.LogInfo($"✓ Status updated to 3 - Rx: {prescriptionNo}");
 
                                         errors.Add($"Prescription {prescriptionNo}: {message}");
@@ -256,24 +267,36 @@ namespace Interface_pattaya.Services
                                 catch (Exception ex)
                                 {
                                     failedCount++;
-                                    var rxNo = reader["f_prescriptionnohis"]?.ToString();
-                                    var rxDate = reader["f_prescriptiondate"]?.ToString();
+                                    var rxNo = reader["f_prescriptionnohis"]?.ToString() ?? "UNKNOWN";
+                                    var rxDate = reader["f_prescriptiondate"]?.ToString() ?? "";
                                     _logger?.LogError($"❌ Row Processing Error - Rx: {rxNo}", ex);
 
-                                    // อัปเดต status เป็น 3 แม้เกิด exception
-                                    await UpdateDispenseStatusAsync(rxNo, rxDate, "3");
+                                    // ✅ อัปเดต status เป็น 3 แม้เกิด exception
+                                    if (!string.IsNullOrEmpty(rxNo) && !string.IsNullOrEmpty(rxDate))
+                                    {
+                                        try
+                                        {
+                                            await UpdateDispenseStatusAsync(rxNo, ExtractDate(rxDate), "3");
+                                        }
+                                        catch { }
+                                    }
 
-                                    errors.Add($"Processing error: {ex.Message}");
+                                    errors.Add($"Processing error for {rxNo}: {ex.Message}");
                                 }
                             }
                         }
                     }
                 }
             }
+            catch (MySqlException ex)
+            {
+                _logger?.LogError("❌ MySQL Database Error", ex);
+                errors.Add($"Database error: {ex.Message}");
+            }
             catch (Exception ex)
             {
-                _logger?.LogError("❌ Critical Database Error", ex);
-                errors.Add($"Database error: {ex.Message}");
+                _logger?.LogError("❌ Critical Error in ProcessAndSendDataAsync", ex);
+                errors.Add($"Critical error: {ex.Message}");
             }
 
             _logger?.LogInfo($"📊 Processing Complete - Success: {successCount}, Failed: {failedCount}, Total: {successCount + failedCount}");
@@ -281,80 +304,159 @@ namespace Interface_pattaya.Services
             return (successCount, failedCount, errors);
         }
 
-        public async Task<(bool success, string message)> SendToApiAsync(PrescriptionBodyRequest prescription)
+        // ✅ เพิ่ม Retry Logic
+        public async Task<(bool success, string message)> SendToApiWithRetryAsync(PrescriptionBodyRequest prescription, int maxRetries = 3)
         {
-            try
+            for (int attempt = 1; attempt <= maxRetries; attempt++)
             {
-                var body = new PrescriptionBodyResponse
+                try
                 {
+                    _logger?.LogInfo($"📤 API Attempt {attempt}/{maxRetries}");
+                    var (success, message) = await SendToApiAsync(prescription);
+
+                    if (success)
+                        return (true, message);
+
+                    if (attempt < maxRetries)
+                    {
+                        await Task.Delay(5000); // Wait 5 seconds before retry
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning($"⚠️ Attempt {attempt} failed: {ex.Message}");
+                    if (attempt < maxRetries)
+                    {
+                        await Task.Delay(5000);
+                    }
+                }
+            }
+
+            return (false, "Failed after all retry attempts");
+        }
+
+        public async Task<(bool success, string message)> SendToApiAsync(PrescriptionBodyRequest prescription)
+
+        {
+
+            try
+
+            {
+
+                var body = new PrescriptionBodyResponse
+
+                {
+
                     data = new[] { prescription }
+
                 };
 
                 var json = JsonSerializer.Serialize(body, new JsonSerializerOptions
+
                 {
+
                     PropertyNamingPolicy = null,
+
                     WriteIndented = true  // ← เปลี่ยนเป็น true เพื่อให้ readable ในไฟล์ log
+
                 });
 
                 _logger?.LogInfo($"📤 Sending API request to: {_apiUrl}");
+
                 _logger?.LogInfo($"Payload size: {json.Length} bytes");
 
+
+
                 // ✅ เก็บค่า data ที่จะส่ง API ในไฟล์ log
+
                 _logger?.LogInfo($"📋 API Request Payload:\n{json}");
 
                 var content = new StringContent(json, Encoding.UTF8, "application/json");
+
                 var response = await _httpClient.PostAsync(_apiUrl, content);
 
                 if (response.IsSuccessStatusCode)
+
                 {
+
                     var responseContent = await response.Content.ReadAsStringAsync();
+
                     _logger?.LogInfo($"✓ API Response (200): {responseContent.Substring(0, Math.Min(200, responseContent.Length))}");
 
+
+
                     // ✅ เก็บ response ทั้งหมด
+
                     _logger?.LogInfo($"📊 Full API Response:\n{responseContent}");
 
+
+
                     return (true, responseContent);
+
                 }
+
                 else
+
                 {
+
                     var errorContent = await response.Content.ReadAsStringAsync();
+
                     var errorMsg = $"API Error {(int)response.StatusCode}: {response.ReasonPhrase}";
+
                     _logger?.LogWarning($"❌ {errorMsg}");
+
                     _logger?.LogWarning($"Response: {errorContent.Substring(0, Math.Min(500, errorContent.Length))}");
 
+
+
                     // ✅ เก็บ error response ทั้งหมด
+
                     _logger?.LogWarning($"📊 Full Error Response:\n{errorContent}");
 
+
+
                     return (false, errorMsg);
+
                 }
+
             }
+
             catch (HttpRequestException ex)
+
             {
+
                 _logger?.LogError("❌ HTTP Request Exception", ex);
+
                 return (false, $"HTTP Error: {ex.Message}");
+
             }
+
             catch (Exception ex)
+
             {
+
                 _logger?.LogError("❌ Unexpected Exception in SendToApiAsync", ex);
+
                 return (false, $"Exception: {ex.Message}");
+
             }
+
         }
 
         private async Task UpdateDispenseStatusAsync(string prescriptionNo, string prescriptionDate, string status)
         {
             if (string.IsNullOrEmpty(prescriptionNo) || string.IsNullOrEmpty(prescriptionDate))
             {
-                _logger?.LogWarning("⚠️ Cannot update status - prescriptionNo or prescriptionDate is null or empty");
+                _logger?.LogWarning("⚠️ Cannot update - prescriptionNo or date is empty");
                 return;
             }
 
-            // Query ตามไดอะแกรม: อัปเดต f_dispensestatus_conhis
             string query = @"
                 UPDATE tb_thaneshosp_middle 
                 SET f_dispensestatus_conhis = @Status,
                     f_dispense_datetime = NOW()
                 WHERE f_prescriptionnohis = @prescriptionnohis 
-                AND f_prescriptiondate = @prescriptiondate";
+                AND SUBSTRING(f_prescriptiondate, 1, 8) = @prescriptiondate";
 
             try
             {
@@ -372,26 +474,25 @@ namespace Interface_pattaya.Services
 
                         if (rowsAffected > 0)
                         {
-                            _logger?.LogInfo($"✓ Database updated: Rx={prescriptionNo}, Date={prescriptionDate}, NewStatus={status}, Rows={rowsAffected}");
+                            _logger?.LogInfo($"✓ DB Updated: Rx={prescriptionNo}, Status={status}, Rows={rowsAffected}");
                         }
                         else
                         {
-                            _logger?.LogWarning($"⚠️ No rows updated - Rx={prescriptionNo}, Date={prescriptionDate}");
+                            _logger?.LogWarning($"⚠️ No rows updated: Rx={prescriptionNo}");
                         }
                     }
                 }
             }
             catch (Exception ex)
             {
-                _logger?.LogError($"❌ Error updating dispense status for Rx={prescriptionNo}, Date={prescriptionDate}", ex);
-                throw;
+                _logger?.LogError($"❌ Error updating status for Rx={prescriptionNo}", ex);
             }
         }
 
         private string ExtractDate(string dateStr)
         {
             if (string.IsNullOrEmpty(dateStr) || dateStr.Length < 8)
-                return dateStr;
+                return dateStr ?? "";
             return dateStr.Substring(0, 8);
         }
 
@@ -402,13 +503,12 @@ namespace Interface_pattaya.Services
 
             try
             {
-                if (dateStr.Length < 8 || timeStr.Length < 6)
+                if (dateStr.Length < 8 || timeStr.Length < 4)
                     return $"{dateStr} {timeStr}";
 
                 string year = dateStr.Substring(0, 4);
                 string month = dateStr.Substring(4, 2);
                 string day = dateStr.Substring(6, 2);
-
                 string hour = timeStr.Substring(0, 2);
                 string minute = timeStr.Substring(2, 2);
                 string second = timeStr.Length >= 6 ? timeStr.Substring(4, 2) : "00";
@@ -423,7 +523,7 @@ namespace Interface_pattaya.Services
 
         private string ProcessSex(string sex)
         {
-            return sex == "0" ? "M" : "F";
+            return string.IsNullOrEmpty(sex) ? "U" : (sex == "0" ? "M" : "F");
         }
 
         private string ProcessPRN(string prnValue, int type)
@@ -431,12 +531,7 @@ namespace Interface_pattaya.Services
             if (string.IsNullOrEmpty(prnValue) || !int.TryParse(prnValue, out int value))
                 return "0";
 
-            if (type == 1 && value == 1)
-                return "1";
-            if (type == 2 && value == 2)
-                return "1";
-
-            return "0";
+            return (type == 1 && value == 1) || (type == 2 && value == 2) ? "1" : "0";
         }
     }
 }
