@@ -453,8 +453,7 @@ namespace Interface_pattaya.Services
 
             string query = @"
                 UPDATE tb_thaneshosp_middle 
-                SET f_dispensestatus_conhis = @Status,
-                    f_dispense_datetime = NOW()
+                SET f_dispensestatus_conhis = @Status
                 WHERE f_prescriptionnohis = @prescriptionnohis 
                 AND SUBSTRING(f_prescriptiondate, 1, 8) = @prescriptiondate";
 
