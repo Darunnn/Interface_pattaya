@@ -9,6 +9,7 @@ using System.Data;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -101,7 +102,6 @@ namespace Interface_pattaya
             try
             {
                 _processedDataTable = new DataTable();
-                _processedDataTable.Columns.Add("Time Check", typeof(string));
                 _processedDataTable.Columns.Add("Transaction DateTime", typeof(string));
                 _processedDataTable.Columns.Add("Order No", typeof(string));
                 _processedDataTable.Columns.Add("HN", typeof(string));
@@ -115,7 +115,6 @@ namespace Interface_pattaya
                     dataGridView.DataSource = _filteredDataView;
 
                     // Set column widths
-                    dataGridView.Columns["Time Check"].Width = 165;
                     dataGridView.Columns["Transaction DateTime"].Width = 165;
                     dataGridView.Columns["Order No"].Width = 120;
                     dataGridView.Columns["HN"].Width = 90;
@@ -471,7 +470,7 @@ namespace Interface_pattaya
                 return;
             }
             statusLabel.Text = $"Status: {status}";
-            _logger?.LogInfo($"Status: {status}");
+          
         }
 
 
@@ -588,7 +587,7 @@ namespace Interface_pattaya
                 try
                 {
                     loopCount++;
-                    _logger?.LogInfo($"Processing Loop #{loopCount}");
+                    
 
                     // ⭐ แสดง Status กำลังตรวจสอบ
                     this.Invoke((MethodInvoker)delegate
@@ -697,15 +696,22 @@ namespace Interface_pattaya
             try
             {
                 _logger?.LogInfo("Refresh button clicked");
-                _currentStatusFilter = "All";
 
+                // ⭐ รีเซ็ตทุกอย่างกลับไปเป็นค่าเริ่มต้น
+                _currentStatusFilter = "All";
                 searchTextBox.Clear();
+
+                // ⭐ รีเซ็ต DateTimePicker กลับไปเป็นวันที่ปัจจุบัน
+                dateTimePicker.Value = DateTime.Now;
 
                 UpdateStatus("🔄 Refreshing data...");
 
-                await LoadDataGridViewAsync(dateTimePicker.Value.ToString("yyyy-MM-dd"), "");
+                // โหลดข้อมูลวันนี้
+                await LoadDataGridViewAsync(DateTime.Now.ToString("yyyy-MM-dd"), "");
 
                 UpdateStatus("✅ Data refreshed");
+
+                _logger?.LogInfo($"Data refreshed - Reset to current date: {DateTime.Now:yyyy-MM-dd}");
             }
             catch (Exception ex)
             {
@@ -867,7 +873,6 @@ namespace Interface_pattaya
                                               (item.Status == "3" ? "Failed" : "Pending");
                         string formattedPrescriptionDate = FormatPrescriptionDate(item.Prescriptiondate);
                         _processedDataTable.Rows.Add(
-                            DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
                             formattedPrescriptionDate,
                             item.PrescriptionNo,
                             item.HN,
@@ -890,7 +895,7 @@ namespace Interface_pattaya
 
                 _logger?.LogInfo($"✅ [DEBUG] Added {addedCount}/{data.Count} rows successfully");
 
-                _filteredDataView.Sort = "[Time Check] DESC";
+              
                 UpdateSummaryCounts();
 
                 if (dataGridView.DataSource == null)
@@ -1134,6 +1139,7 @@ namespace Interface_pattaya
             base.OnFormClosing(e);
         }
 
+        // ✅ แก้ไข ExportButton_Click - ใช้ async เพื่อดึงข้อมูลจาก database
         private async void ExportButton_Click(object sender, EventArgs e)
         {
             try
@@ -1154,8 +1160,8 @@ namespace Interface_pattaya
                     return;
                 }
 
-                // Export เฉพาะที่เลือก (ดึงข้อมูลแบบเต็มจาก database)
-                await ExportSelectedRows();
+                // ✅ เรียก async method
+                await ExportSelectedRowsAsync();
             }
             catch (Exception ex)
             {
@@ -1164,7 +1170,8 @@ namespace Interface_pattaya
             }
         }
 
-        private void ExportSelectedRows()
+        // ✅ Export เป็น JSON Format แบบแนวตั้ง (Pretty Print)
+        private async Task ExportSelectedRowsAsync()
         {
             try
             {
@@ -1176,57 +1183,117 @@ namespace Interface_pattaya
 
                 _logger?.LogInfo($"Exporting {dataGridView.SelectedRows.Count} selected rows");
 
-                // เปิด SaveFileDialog
+                // ⭐ Step 1: รวบรวม PrescriptionNo และ Date จากแถวที่เลือก
+                var prescriptionList = new List<(string prescriptionNo, string prescriptionDate)>();
+
+                foreach (DataGridViewRow row in dataGridView.SelectedRows)
+                {
+                    try
+                    {
+                        string prescriptionNo = row.Cells["Order No"]?.Value?.ToString() ?? "";
+                        string transactionDateTime = row.Cells["Transaction DateTime"]?.Value?.ToString() ?? "";
+
+                        // แปลง "2024-12-11 14:30:00" → "20241211"
+                        string prescriptionDate = "";
+                        if (!string.IsNullOrEmpty(transactionDateTime) && transactionDateTime.Length >= 10)
+                        {
+                            prescriptionDate = transactionDateTime.Substring(0, 10).Replace("-", "");
+                        }
+
+                        if (!string.IsNullOrEmpty(prescriptionNo) && !string.IsNullOrEmpty(prescriptionDate))
+                        {
+                            prescriptionList.Add((prescriptionNo, prescriptionDate));
+                            _logger?.LogInfo($"   Adding: Rx={prescriptionNo}, Date={prescriptionDate}");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger?.LogWarning($"Error processing row for export: {ex.Message}");
+                    }
+                }
+
+                if (prescriptionList.Count == 0)
+                {
+                    ShowAutoClosingMessageBox("ไม่สามารถดึงข้อมูล Prescription ได้", "แจ้งเตือน");
+                    return;
+                }
+
+                _logger?.LogInfo($"📦 Fetching full data for {prescriptionList.Count} prescriptions from database...");
+
+                // ⭐ Step 2: ดึงข้อมูลเต็มจาก Database
+                UpdateStatus($"⏳ Loading full data for export ({prescriptionList.Count} prescriptions)...");
+
+                var fullDataList = await _dataService.GetFullPrescriptionDataAsync(prescriptionList);
+
+                if (fullDataList == null || fullDataList.Count == 0)
+                {
+                    ShowAutoClosingMessageBox("ไม่พบข้อมูลจาก Database", "แจ้งเตือน");
+                    UpdateStatus("⚠️ Export cancelled - No data found");
+                    return;
+                }
+
+                _logger?.LogInfo($"✅ Retrieved {fullDataList.Count} records from database");
+
+                // ⭐ Step 3: เปิด SaveFileDialog (JSON เท่านั้น)
                 using (var saveFileDialog = new SaveFileDialog())
                 {
-                    saveFileDialog.Filter = "CSV Files (*.csv)|*.csv|Excel Files (*.xlsx)|*.xlsx|All Files (*.*)|*.*";
-                    saveFileDialog.DefaultExt = "csv";
-                    saveFileDialog.FileName = $"Export_Selected_{DateTime.Now:yyyyMMdd_HHmmss}.csv";
+                    saveFileDialog.Filter = "JSON Files (*.json)|*.json";
+                    saveFileDialog.DefaultExt = "json";
+                    saveFileDialog.FileName = $"Export_Prescriptions_{DateTime.Now:yyyyMMdd_HHmmss}.json";
 
                     if (saveFileDialog.ShowDialog() == DialogResult.OK)
                     {
                         string filePath = saveFileDialog.FileName;
 
-                        // สร้าง CSV content
-                        var csvContent = new StringBuilder();
+                        UpdateStatus($"💾 Exporting to {Path.GetFileName(filePath)}...");
 
-                        // Header
-                        var headers = new List<string>();
-                        foreach (DataGridViewColumn column in dataGridView.Columns)
+                        // ⭐ Step 4: สร้าง JSON Body เหมือนกับที่ส่งไป API
+                        var body = new PrescriptionBodyResponse
                         {
-                            headers.Add($"\"{column.HeaderText}\"");
-                        }
-                        csvContent.AppendLine(string.Join(",", headers));
+                            data = fullDataList.ToArray()
+                        };
 
-                        // Rows (เฉพาะที่เลือก)
-                        foreach (DataGridViewRow row in dataGridView.SelectedRows)
+                        // ⭐ ใช้ JsonSerializer พร้อม WriteIndented = true (แนวตั้ง)
+                        var json = JsonSerializer.Serialize(body, new JsonSerializerOptions
                         {
-                            var rowData = new List<string>();
-                            foreach (DataGridViewCell cell in row.Cells)
-                            {
-                                string cellValue = cell.Value?.ToString() ?? "";
-                                rowData.Add($"\"{cellValue.Replace("\"", "\"\"")}\"");
-                            }
-                            csvContent.AppendLine(string.Join(",", rowData));
-                        }
+                            PropertyNamingPolicy = null, // ใช้ชื่อ property ตามที่กำหนด
+                            WriteIndented = true, // ⭐ เปิด Pretty Print (แนวตั้ง)
+                            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping, // ไม่เข้ารหัสภาษาไทย
+                            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.Never // แสดงทุก field แม้เป็น null
+                        });
 
-                        // บันทึกไฟล์
-                        File.WriteAllText(filePath, csvContent.ToString(), Encoding.UTF8);
+                        // ⭐ Step 5: บันทึกไฟล์
+                        await Task.Run(() => File.WriteAllText(filePath, json, Encoding.UTF8));
 
                         _logger?.LogInfo($"✅ Export completed: {filePath}");
+                        _logger?.LogInfo($"   Total records exported: {fullDataList.Count}");
+                        _logger?.LogInfo($"   File size: {new FileInfo(filePath).Length / 1024.0:F2} KB");
+
+                        UpdateStatus($"✅ Export completed - {fullDataList.Count} records");
+
                         ShowAutoClosingMessageBox(
-                            $"✅ Export สำเร็จ!\n\nจำนวน: {dataGridView.SelectedRows.Count} รายการ\nบันทึกที่: {filePath}",
+                            $"✅ Export สำเร็จ!\n\n" +
+                            $"จำนวน Prescriptions: {prescriptionList.Count}\n" +
+                            $"จำนวน Records: {fullDataList.Count}\n" +
+                            $"ขนาดไฟล์: {new FileInfo(filePath).Length / 1024.0:F2} KB\n" +
+                            $"บันทึกที่: {filePath}",
                             "สำเร็จ",
                             3000
                         );
+                    }
+                    else
+                    {
+                        UpdateStatus("⚠️ Export cancelled");
                     }
                 }
             }
             catch (Exception ex)
             {
                 _logger?.LogError("Error exporting selected rows", ex);
+                UpdateStatus("❌ Export failed");
                 ShowAutoClosingMessageBox($"ข้อผิดพลาดในการ Export: {ex.Message}", "ข้อผิดพลาด");
             }
         }
+
     }
 }

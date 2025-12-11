@@ -28,6 +28,7 @@
         /// </summary>
         private void InitializeComponent()
         {
+            System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(SettingsForm));
             tabControl = new TabControl();
             tabDatabase = new TabPage();
             btnTestConnection = new Button();
@@ -364,11 +365,12 @@
             Controls.Add(panelButtons);
             Font = new Font("Tahoma", 9F);
             FormBorderStyle = FormBorderStyle.FixedDialog;
+            Icon = (Icon)resources.GetObject("$this.Icon");
             MaximizeBox = false;
             MinimizeBox = false;
             Name = "SettingsForm";
             StartPosition = FormStartPosition.CenterParent;
-            Text = "⚙️ Settings - Interface Pattaya";
+            Text = "Settings - Interface Pattaya";
             tabControl.ResumeLayout(false);
             tabDatabase.ResumeLayout(false);
             tabDatabase.PerformLayout();

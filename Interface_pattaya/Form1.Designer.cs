@@ -24,6 +24,7 @@
 
         private void InitializeComponent()
         {
+            System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(Form1));
             statusLabel = new Label();
             lastCheckLabel = new Label();
             lastFoundLabel = new Label();
@@ -423,7 +424,10 @@
             Controls.Add(groupBox3);
             Controls.Add(groupBox2);
             Controls.Add(groupBox1);
+            Icon = (Icon)resources.GetObject("$this.Icon");
             Margin = new Padding(4, 3, 4, 3);
+            MaximumSize = new Size(865, 744);
+            MinimumSize = new Size(865, 744);
             Name = "Form1";
             StartPosition = FormStartPosition.Manual;
             Text = "Interface Pataya - Drug Dispense Monitor";
