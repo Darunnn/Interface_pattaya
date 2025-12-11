@@ -1,15 +1,17 @@
-﻿using System;
+﻿using Interface_pattaya.Configuration;
+using Interface_pattaya.Models;
+using Interface_pattaya.Services;
+using Interface_pattaya.utils;
+using MySql.Data.MySqlClient;
+using System;
 using System.Collections.Generic;
 using System.Data;
+using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using MySql.Data.MySqlClient;
-using Interface_pattaya.Configuration;
-using Interface_pattaya.Services;
-using Interface_pattaya.utils;
-using Interface_pattaya.Models;
 
 namespace Interface_pattaya
 {
@@ -1130,6 +1132,101 @@ namespace Interface_pattaya
             }
 
             base.OnFormClosing(e);
+        }
+
+        private async void ExportButton_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                _logger?.LogInfo("Export button clicked");
+
+                // ตรวจสอบว่ามีข้อมูลใน DataGridView หรือไม่
+                if (dataGridView.Rows.Count == 0)
+                {
+                    ShowAutoClosingMessageBox("ไม่มีข้อมูลให้ Export", "แจ้งเตือน");
+                    return;
+                }
+
+                // ตรวจสอบว่ามีการเลือกแถวหรือไม่
+                if (dataGridView.SelectedRows.Count == 0)
+                {
+                    ShowAutoClosingMessageBox("กรุณาเลือกข้อมูลที่ต้องการ Export ก่อน", "แจ้งเตือน");
+                    return;
+                }
+
+                // Export เฉพาะที่เลือก (ดึงข้อมูลแบบเต็มจาก database)
+                await ExportSelectedRows();
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError("Error in ExportButton_Click", ex);
+                ShowAutoClosingMessageBox($"ข้อผิดพลาด: {ex.Message}", "ข้อผิดพลาด");
+            }
+        }
+
+        private void ExportSelectedRows()
+        {
+            try
+            {
+                if (dataGridView.SelectedRows.Count == 0)
+                {
+                    ShowAutoClosingMessageBox("กรุณาเลือกข้อมูลที่ต้องการ Export", "แจ้งเตือน");
+                    return;
+                }
+
+                _logger?.LogInfo($"Exporting {dataGridView.SelectedRows.Count} selected rows");
+
+                // เปิด SaveFileDialog
+                using (var saveFileDialog = new SaveFileDialog())
+                {
+                    saveFileDialog.Filter = "CSV Files (*.csv)|*.csv|Excel Files (*.xlsx)|*.xlsx|All Files (*.*)|*.*";
+                    saveFileDialog.DefaultExt = "csv";
+                    saveFileDialog.FileName = $"Export_Selected_{DateTime.Now:yyyyMMdd_HHmmss}.csv";
+
+                    if (saveFileDialog.ShowDialog() == DialogResult.OK)
+                    {
+                        string filePath = saveFileDialog.FileName;
+
+                        // สร้าง CSV content
+                        var csvContent = new StringBuilder();
+
+                        // Header
+                        var headers = new List<string>();
+                        foreach (DataGridViewColumn column in dataGridView.Columns)
+                        {
+                            headers.Add($"\"{column.HeaderText}\"");
+                        }
+                        csvContent.AppendLine(string.Join(",", headers));
+
+                        // Rows (เฉพาะที่เลือก)
+                        foreach (DataGridViewRow row in dataGridView.SelectedRows)
+                        {
+                            var rowData = new List<string>();
+                            foreach (DataGridViewCell cell in row.Cells)
+                            {
+                                string cellValue = cell.Value?.ToString() ?? "";
+                                rowData.Add($"\"{cellValue.Replace("\"", "\"\"")}\"");
+                            }
+                            csvContent.AppendLine(string.Join(",", rowData));
+                        }
+
+                        // บันทึกไฟล์
+                        File.WriteAllText(filePath, csvContent.ToString(), Encoding.UTF8);
+
+                        _logger?.LogInfo($"✅ Export completed: {filePath}");
+                        ShowAutoClosingMessageBox(
+                            $"✅ Export สำเร็จ!\n\nจำนวน: {dataGridView.SelectedRows.Count} รายการ\nบันทึกที่: {filePath}",
+                            "สำเร็จ",
+                            3000
+                        );
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError("Error exporting selected rows", ex);
+                ShowAutoClosingMessageBox($"ข้อผิดพลาดในการ Export: {ex.Message}", "ข้อผิดพลาด");
+            }
         }
     }
 }

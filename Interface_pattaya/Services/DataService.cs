@@ -648,7 +648,223 @@ namespace Interface_pattaya.Services
 
             return dataList;
         }
+        // เพิ่ม method นี้ใน DataService.cs
 
+        public async Task<List<PrescriptionBodyRequest>> GetFullPrescriptionDataAsync(
+            List<(string prescriptionNo, string prescriptionDate)> prescriptions)
+        {
+            var dataList = new List<PrescriptionBodyRequest>();
+
+            if (prescriptions == null || prescriptions.Count == 0)
+            {
+                _logger?.LogWarning("No prescriptions provided for export");
+                return dataList;
+            }
+
+            string query = @"
+        SELECT 
+            f_referenceCode,
+            f_prescriptionnohis,
+            f_seq,
+            f_seqmax,
+            f_prescriptiondate,
+            f_ordercreatedate,
+            f_ordercreatetime,
+            f_ordertargetdate,
+            f_ordertargettime,
+            f_doctorcode,
+            f_doctorname,
+            f_useracceptby,
+            f_orderacceptdate,
+            f_orderaccepttime,
+            f_orderacceptfromip,
+            f_pharmacylocationpackcode,
+            f_pharmacylocationpackdesc,
+            f_prioritycode,
+            f_prioritydesc,
+            f_hn,
+            f_en,
+            f_patientname,
+            f_sex,
+            f_patientdob,
+            f_wardcode,
+            f_warddesc,
+            f_roomcode,
+            f_roomdesc,
+            f_bedcode,
+            f_freetext4,
+            f_orderitemname,
+            f_orderitemnameTH,
+            f_orderitemgenericname,
+            f_orderqty,
+            f_orderunitcode,
+            f_orderunitdesc,
+            f_dosage,
+            f_dosageunit,
+            f_heighAlertDrug,
+            f_narcoticdrug,
+            f_psychotropicDrug,
+            f_itemlotcode,
+            f_itemlotexpire,
+            f_instructioncode,
+            f_instructiondesc,
+            f_frequencycode,
+            f_frequencydesc,
+            f_frequencyTime,
+            f_dosagedispense,
+            f_noteprocessing,
+            f_PRN,
+            f_comment,
+            f_tomachineno,
+            f_ipdpt_record_no,
+            f_status,
+            f_freetext1,
+            f_freetext2
+        FROM tb_thaneshosp_middle
+        WHERE f_prescriptionnohis = @PrescriptionNo
+        AND SUBSTRING(f_prescriptiondate, 1, 8) = @PrescriptionDate
+        ORDER BY f_seq";
+
+            _logger?.LogInfo($"📥 Fetching full data for {prescriptions.Count} prescriptions");
+
+            try
+            {
+                using (var connection = new MySqlConnection(_connectionString))
+                {
+                    await connection.OpenAsync();
+
+                    foreach (var (prescriptionNo, prescriptionDate) in prescriptions)
+                    {
+                        try
+                        {
+                            using (var command = new MySqlCommand(query, connection))
+                            {
+                                command.Parameters.AddWithValue("@PrescriptionNo", prescriptionNo);
+                                command.Parameters.AddWithValue("@PrescriptionDate", prescriptionDate);
+                                command.CommandTimeout = 60;
+
+                                using (var reader = await command.ExecuteReaderAsync())
+                                {
+                                    while (await reader.ReadAsync())
+                                    {
+                                        try
+                                        {
+                                            var referenceCode = reader["f_referenceCode"]?.ToString() ?? "";
+                                            var seq = reader["f_seq"]?.ToString() ?? "0";
+                                            var prescriptionDateRaw = reader["f_prescriptiondate"]?.ToString() ?? "";
+                                            var prescriptionDateFormatted = ExtractDate(prescriptionDateRaw);
+
+                                            var freetext1 = reader["f_freetext1"]?.ToString() ?? "";
+                                            var freetext2 = reader["f_freetext2"]?.ToString() ?? "";
+                                            var freetext1Parts = freetext1.Split('^');
+                                            var freetext2Parts = freetext2.Split('^');
+                                            var sex = ProcessSex(reader["f_sex"]?.ToString());
+                                            var prnValue = reader["f_PRN"]?.ToString();
+                                            var prn = ProcessPRN(prnValue, 1);
+                                            var stat = ProcessPRN(prnValue, 2);
+
+                                            var prescriptionBody = new PrescriptionBodyRequest
+                                            {
+                                                UniqID = $"{referenceCode}-{prescriptionDate}",
+                                                f_prescriptionno = prescriptionNo,
+                                                f_seq = int.TryParse(seq, out int seqVal) ? seqVal : 0,
+                                                f_seqmax = int.TryParse(reader["f_seqmax"]?.ToString(), out int seqmax) ? seqmax : 0,
+                                                f_prescriptiondate = prescriptionDateFormatted,
+                                                f_ordercreatedate = reader["f_ordercreatedate"]?.ToString() + " " + reader["f_ordercreatetime"]?.ToString(),
+                                                f_ordertargetdate = reader["f_ordertargetdate"]?.ToString(),
+                                                f_ordertargettime = reader["f_ordertargettime"]?.ToString(),
+                                                f_doctorcode = reader["f_doctorcode"]?.ToString(),
+                                                f_doctorname = reader["f_doctorname"]?.ToString(),
+                                                f_useracceptby = reader["f_useracceptby"]?.ToString(),
+                                                f_orderacceptdate = reader["f_orderacceptdate"]?.ToString() + " " + reader["f_orderaccepttime"]?.ToString(),
+                                                f_orderacceptfromip = reader["f_orderacceptfromip"]?.ToString(),
+                                                f_pharmacylocationcode = reader["f_pharmacylocationpackcode"]?.ToString(),
+                                                f_pharmacylocationdesc = reader["f_pharmacylocationpackdesc"]?.ToString(),
+                                                f_prioritycode = reader["f_prioritycode"]?.ToString(),
+                                                f_prioritydesc = reader["f_prioritydesc"]?.ToString(),
+                                                f_hn = reader["f_hn"]?.ToString(),
+                                                f_an = reader["f_en"]?.ToString(),
+                                                f_vn = null,
+                                                f_title = null,
+                                                f_patientname = reader["f_patientname"]?.ToString(),
+                                                f_sex = sex,
+                                                f_patientdob = reader["f_patientdob"]?.ToString(),
+                                                f_wardcode = reader["f_wardcode"]?.ToString(),
+                                                f_warddesc = reader["f_warddesc"]?.ToString(),
+                                                f_roomcode = reader["f_roomcode"]?.ToString(),
+                                                f_roomdesc = reader["f_roomdesc"]?.ToString(),
+                                                f_bedcode = reader["f_bedcode"]?.ToString(),
+                                                f_beddesc = reader["f_bedcode"]?.ToString(),
+                                                f_right = null,
+                                                f_drugallergy = reader["f_freetext4"]?.ToString(),
+                                                f_diagnosis = null,
+                                                f_orderitemcode = freetext2Parts.Length > 0 ? freetext2Parts[0] : "",
+                                                f_orderitemname = reader["f_orderitemname"]?.ToString(),
+                                                f_orderitemnameTH = reader["f_orderitemnameTH"]?.ToString(),
+                                                f_orderitemnamegeneric = reader["f_orderitemgenericname"]?.ToString(),
+                                                f_orderqty = int.TryParse(reader["f_orderqty"]?.ToString(), out int qty) ? qty : 0,
+                                                f_orderunitcode = reader["f_orderunitcode"]?.ToString(),
+                                                f_orderunitdesc = reader["f_orderunitdesc"]?.ToString(),
+                                                f_dosage = int.TryParse(reader["f_dosage"]?.ToString(), out int dosage) ? dosage : 0,
+                                                f_dosageunit = reader["f_dosageunit"]?.ToString(),
+                                                f_dosagetext = null,
+                                                f_drugformcode = null,
+                                                f_drugformdesc = null,
+                                                f_HAD = reader["f_heighAlertDrug"]?.ToString() ?? "0",
+                                                f_narcoticFlg = reader["f_narcoticdrug"]?.ToString() ?? "0",
+                                                f_psychotropic = reader["f_psychotropicDrug"]?.ToString() ?? "0",
+                                                f_binlocation = freetext2Parts.Length > 1 ? freetext2Parts[1] : "",
+                                                f_itemidentify = null,
+                                                f_itemlotno = reader["f_itemlotcode"]?.ToString(),
+                                                f_itemlotexpire = reader["f_itemlotexpire"]?.ToString(),
+                                                f_instructioncode = reader["f_instructioncode"]?.ToString(),
+                                                f_instructiondesc = reader["f_instructiondesc"]?.ToString(),
+                                                f_frequencycode = reader["f_frequencycode"]?.ToString(),
+                                                f_frequencydesc = reader["f_frequencydesc"]?.ToString(),
+                                                f_timecode = null,
+                                                f_timedesc = null,
+                                                f_frequencytime = reader["f_frequencyTime"]?.ToString(),
+                                                f_dosagedispense = reader["f_dosagedispense"]?.ToString(),
+                                                f_dayofweek = null,
+                                                f_noteprocessing = reader["f_noteprocessing"]?.ToString(),
+                                                f_prn = prn,
+                                                f_stat = stat,
+                                                f_comment = reader["f_comment"]?.ToString(),
+                                                f_tomachineno = int.TryParse(reader["f_tomachineno"]?.ToString(), out int machine) ? machine : 0,
+                                                f_ipd_order_recordno = reader["f_ipdpt_record_no"]?.ToString(),
+                                                f_status = reader["f_status"]?.ToString(),
+                                                f_remark = freetext1Parts.Length > 0 ? freetext1Parts[0] : "",
+                                                f_durationtext = freetext1Parts.Length > 1 ? freetext1Parts[1] : "",
+                                                f_labeltext = freetext2Parts.Length > 2 ? freetext2Parts[2] : "",
+                                                f_dosagedispense_compare = freetext1Parts.Length > 2 ? freetext1Parts[2] : ""
+                                            };
+
+                                            dataList.Add(prescriptionBody);
+                                        }
+                                        catch (Exception rowEx)
+                                        {
+                                            _logger?.LogError($"Error reading row for prescription {prescriptionNo}", rowEx);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        catch (Exception prescriptionEx)
+                        {
+                            _logger?.LogError($"Error fetching data for prescription {prescriptionNo}", prescriptionEx);
+                        }
+                    }
+                }
+
+                _logger?.LogInfo($"✅ Fetched {dataList.Count} records for export");
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError("Error in GetFullPrescriptionDataAsync", ex);
+            }
+
+            return dataList;
+        }
         private string ExtractDate(string dateStr)
         {
             if (string.IsNullOrEmpty(dateStr))

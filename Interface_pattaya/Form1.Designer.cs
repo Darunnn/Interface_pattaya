@@ -31,6 +31,7 @@
             connectionStatusLabel = new Label();
             startStopButton = new Button();
             settingsButton = new Button();
+            exportButton = new Button();
             dateLabel = new Label();
             dateTimePicker = new DateTimePicker();
             searchLabel = new Label();
@@ -139,6 +140,20 @@
             settingsButton.Text = "⚙️ Settings";
             settingsButton.UseVisualStyleBackColor = true;
             settingsButton.Click += SettingsButton_Click;
+            // 
+            // exportButton
+            // 
+            exportButton.BackColor = Color.FromArgb(155, 89, 182);
+            exportButton.FlatStyle = FlatStyle.Flat;
+            exportButton.ForeColor = Color.White;
+            exportButton.Location = new Point(315, 23);
+            exportButton.Margin = new Padding(4, 3, 4, 3);
+            exportButton.Name = "exportButton";
+            exportButton.Size = new Size(136, 37);
+            exportButton.TabIndex = 6;
+            exportButton.Text = "📥 Export";
+            exportButton.UseVisualStyleBackColor = false;
+            exportButton.Click += ExportButton_Click;
             // 
             // dateLabel
             // 
@@ -335,6 +350,7 @@
             groupBox2.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             groupBox2.Controls.Add(startStopButton);
             groupBox2.Controls.Add(settingsButton);
+            groupBox2.Controls.Add(exportButton);
             groupBox2.Location = new Point(18, 136);
             groupBox2.Margin = new Padding(4, 3, 4, 3);
             groupBox2.Name = "groupBox2";
@@ -437,6 +453,7 @@
         // Controls Zone
         private System.Windows.Forms.Button startStopButton;
         private System.Windows.Forms.Button settingsButton;
+        private System.Windows.Forms.Button exportButton;
 
         // Search & Filter Zone
         private System.Windows.Forms.Label searchLabel;
