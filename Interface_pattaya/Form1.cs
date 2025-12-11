@@ -23,7 +23,8 @@ namespace Interface_pattaya
         private CancellationTokenSource _cancellationTokenSource;
         private System.Windows.Forms.Timer _connectionCheckTimer;
         private System.Windows.Forms.Timer _autoMessageBoxTimer;
-
+        private DateTime _lastConnectedTime = DateTime.MinValue;
+        private bool _wasServiceRunningBeforeDisconnect = false;
         // ⭐ DataTable & DataView for better filtering/sorting
         private DataTable _processedDataTable;
         private DataView _filteredDataView;
@@ -324,6 +325,7 @@ namespace Interface_pattaya
                 {
                     connection.Open();
 
+                    // ✅ เปลี่ยนสถานะจาก Disconnected → Connected
                     if (!_isDatabaseConnected)
                     {
                         _isDatabaseConnected = true;
@@ -334,7 +336,7 @@ namespace Interface_pattaya
                         {
                             this.Invoke((MethodInvoker)delegate
                             {
-                                UpdateDatabaseConnectedUI();
+                                UpdateDatabaseConnectedUI(); // จะอัพเดทเวลาที่นี่
                             });
                         }
                         else
@@ -342,6 +344,7 @@ namespace Interface_pattaya
                             UpdateDatabaseConnectedUI();
                         }
                     }
+                    // ⚠️ ถ้ายังคง Connected อยู่ ไม่ต้องทำอะไร (ไม่อัพเดทเวลา)
 
                     connection.Close();
                 }
@@ -352,18 +355,22 @@ namespace Interface_pattaya
                     if (_isDatabaseConnected)
                     {
                         _isDatabaseConnected = false;
-                        _logger.LogConnectDatabase(false, DateTime.Now, DateTime.Now);
+
+                        // คำนวณเวลา disconnect
+                        DateTime disconnectTime = DateTime.Now;
+
+                        _logger.LogConnectDatabase(false, _lastConnectedTime, disconnectTime);
 
                         if (this.InvokeRequired)
                         {
                             this.Invoke((MethodInvoker)delegate
                             {
-                                UpdateDatabaseDisconnectedUI();
+                                UpdateDatabaseDisconnectedUI(disconnectTime);
                             });
                         }
                         else
                         {
-                            UpdateDatabaseDisconnectedUI();
+                            UpdateDatabaseDisconnectedUI(disconnectTime);
                         }
                     }
                 }
@@ -379,7 +386,7 @@ namespace Interface_pattaya
                         {
                             this.Invoke((MethodInvoker)delegate
                             {
-                                UpdateDatabaseDisconnectedUI();
+                                UpdateDatabaseDisconnectedUI(DateTime.Now);
                             });
                         }
                     }
@@ -387,16 +394,28 @@ namespace Interface_pattaya
             }
         }
 
+
         private void UpdateDatabaseConnectedUI()
         {
             try
             {
-                connectionStatusLabel.Text = "Database: 🟢 Connected";
+                // บันทึกเวลาที่เชื่อมต่อสำเร็จ
+                _lastConnectedTime = DateTime.Now;
+
+                connectionStatusLabel.Text = $"Database: 🟢 Connected (Last Connected: {_lastConnectedTime:yyyy-MM-dd HH:mm:ss})";
                 connectionStatusLabel.ForeColor = System.Drawing.Color.Green;
                 startStopButton.Enabled = true;
                 startStopButton.BackColor = System.Drawing.Color.FromArgb(52, 152, 219);
 
-                _logger?.LogInfo("UI updated - database connected");
+                // ⭐ ถ้าก่อนหน้านี้ service กำลังทำงานอยู่ ให้ start อัตโนมัติ
+                if (_wasServiceRunningBeforeDisconnect)
+                {
+                    _logger?.LogInfo("🔄 Auto-restarting service after database reconnection");
+                    StartService();
+                    _wasServiceRunningBeforeDisconnect = false; // reset flag
+                }
+
+                _logger?.LogInfo($"UI updated - database connected at {_lastConnectedTime:yyyy-MM-dd HH:mm:ss}");
             }
             catch (Exception ex)
             {
@@ -404,28 +423,39 @@ namespace Interface_pattaya
             }
         }
 
-        private void UpdateDatabaseDisconnectedUI()
+        private void UpdateDatabaseDisconnectedUI(DateTime disconnectTime)
         {
             try
             {
-                connectionStatusLabel.Text = "Database: 🔴 Disconnected";
+                // ⭐ บันทึกสถานะว่า service กำลังทำงานหรือไม่ ก่อน disconnect
+                if (_isServiceRunning)
+                {
+                    _wasServiceRunningBeforeDisconnect = true;
+                    _logger?.LogInfo("⚠️ Service was running before disconnect - will auto-restart when reconnected");
+                    StopService();
+                }
+                else
+                {
+                    _wasServiceRunningBeforeDisconnect = false;
+                }
+
+                string lastConnectInfo = _lastConnectedTime != DateTime.MinValue
+                    ? $" (Last Connected: {_lastConnectedTime:yyyy-MM-dd HH:mm:ss})"
+                    : "";
+
+                connectionStatusLabel.Text = $"Database: 🔴 Disconnected (Disconnected at: {disconnectTime:yyyy-MM-dd HH:mm:ss}){lastConnectInfo}";
                 connectionStatusLabel.ForeColor = System.Drawing.Color.Red;
                 startStopButton.Enabled = false;
                 startStopButton.BackColor = System.Drawing.Color.Gray;
 
-                if (_isServiceRunning)
-                {
-                    _logger?.LogInfo("Stopping service due to database disconnection");
-                    StopService();
-                }
-
-                _logger?.LogInfo("UI updated - database disconnected");
+                _logger?.LogInfo($"UI updated - database disconnected at {disconnectTime:yyyy-MM-dd HH:mm:ss}");
             }
             catch (Exception ex)
             {
                 _logger?.LogError("Error updating disconnected UI", ex);
             }
         }
+        
 
         private void UpdateUIState()
         {
@@ -632,13 +662,49 @@ namespace Interface_pattaya
             try
             {
                 _logger?.LogInfo("Settings button clicked");
+
+                // เปิด Settings Form
+                using (var settingsForm = new SettingsForm())
+                {
+                    var result = settingsForm.ShowDialog(this);
+
+                    if (result == DialogResult.OK && settingsForm.SettingsChanged)
+                    {
+                        _logger?.LogInfo("Settings were changed, reloading configuration...");
+
+                        // โหลดการตั้งค่าใหม่
+                        _appConfig = new AppConfig();
+                        if (_appConfig.LoadConfiguration())
+                        {
+                            _dataService = new DataService(_appConfig.ConnectionString, _appConfig.ApiEndpoint, _logger);
+                            _logger?.LogInfo("Configuration reloaded successfully");
+
+                            ShowAutoClosingMessageBox(
+                                "✅ การตั้งค่าได้รับการอัพเดทแล้ว\nบางการตั้งค่าอาจต้อง Restart โปรแกรม",
+                                "สำเร็จ",
+                                3000
+                            );
+
+                            // ตรวจสอบการเชื่อมต่อฐานข้อมูลใหม่
+                            CheckDatabaseConnection();
+                        }
+                        else
+                        {
+                            _logger?.LogError("Failed to reload configuration");
+                            ShowAutoClosingMessageBox(
+                                "⚠️ ไม่สามารถโหลดการตั้งค่าใหม่ได้\nกรุณาตรวจสอบไฟล์ config",
+                                "คำเตือน"
+                            );
+                        }
+                    }
+                }
             }
             catch (Exception ex)
             {
                 _logger?.LogError("Error in SettingsButton_Click", ex);
+                ShowAutoClosingMessageBox($"ข้อผิดพลาด: {ex.Message}", "ข้อผิดพลาด");
             }
         }
-
         // ⭐ Load Data and Add to DataTable
         private async Task LoadDataGridViewAsync(string date = "", string searchText = "")
         {

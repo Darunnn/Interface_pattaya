@@ -123,22 +123,22 @@
             startStopButton.Location = new Point(18, 23);
             startStopButton.Margin = new Padding(4, 3, 4, 3);
             startStopButton.Name = "startStopButton";
-            startStopButton.Size = new Size(163, 37);
+            startStopButton.Size = new Size(139, 37);
             startStopButton.TabIndex = 0;
             startStopButton.Text = "▶ Start";
-            this.startStopButton.Click += new System.EventHandler(this.StartStopButton_Click);
             startStopButton.UseVisualStyleBackColor = false;
+            startStopButton.Click += StartStopButton_Click;
             // 
             // settingsButton
             // 
-            settingsButton.Location = new Point(189, 23);
+            settingsButton.Location = new Point(164, 23);
             settingsButton.Margin = new Padding(4, 3, 4, 3);
             settingsButton.Name = "settingsButton";
             settingsButton.Size = new Size(140, 37);
             settingsButton.TabIndex = 3;
             settingsButton.Text = "⚙️ Settings";
-            this.settingsButton.Click += new System.EventHandler(this.SettingsButton_Click);
             settingsButton.UseVisualStyleBackColor = true;
+            settingsButton.Click += SettingsButton_Click;
             // 
             // dateLabel
             // 
@@ -188,8 +188,8 @@
             searchButton.Size = new Size(105, 30);
             searchButton.TabIndex = 4;
             searchButton.Text = "🔍 Search";
-            this.searchButton.Click += new System.EventHandler(this.SearchButton_Click);
             searchButton.UseVisualStyleBackColor = false;
+            searchButton.Click += SearchButton_Click;
             // 
             // refreshButton
             // 
@@ -199,8 +199,8 @@
             refreshButton.Size = new Size(105, 30);
             refreshButton.TabIndex = 5;
             refreshButton.Text = "🔄 Refresh";
-            this.refreshButton.Click += new System.EventHandler(this.RefreshButton_Click);
             refreshButton.UseVisualStyleBackColor = true;
+            refreshButton.Click += RefreshButton_Click;
             // 
             // totalPanel
             // 
@@ -214,7 +214,7 @@
             totalPanel.Name = "totalPanel";
             totalPanel.Size = new Size(210, 69);
             totalPanel.TabIndex = 0;
-            this.totalPanel.Click += new System.EventHandler(this.TotalPanel_Click);
+            totalPanel.Click += TotalPanel_Click;
             // 
             // totalLabel
             // 
@@ -251,7 +251,7 @@
             successPanel.Name = "successPanel";
             successPanel.Size = new Size(210, 69);
             successPanel.TabIndex = 1;
-            this.successPanel.Click += new System.EventHandler(this.SuccessPanel_Click);
+            successPanel.Click += SuccessPanel_Click;
             // 
             // successLabel
             // 
@@ -288,7 +288,7 @@
             failedPanel.Name = "failedPanel";
             failedPanel.Size = new Size(210, 69);
             failedPanel.TabIndex = 2;
-            this.failedPanel.Click += new System.EventHandler(this.FailedPanel_Click);
+            failedPanel.Click += FailedPanel_Click;
             // 
             // failedLabel
             // 
@@ -325,7 +325,7 @@
             groupBox1.Margin = new Padding(4, 3, 4, 3);
             groupBox1.Name = "groupBox1";
             groupBox1.Padding = new Padding(4, 3, 4, 3);
-            groupBox1.Size = new Size(1116, 115);
+            groupBox1.Size = new Size(818, 115);
             groupBox1.TabIndex = 0;
             groupBox1.TabStop = false;
             groupBox1.Text = "📊 Status Information";
@@ -339,7 +339,7 @@
             groupBox2.Margin = new Padding(4, 3, 4, 3);
             groupBox2.Name = "groupBox2";
             groupBox2.Padding = new Padding(4, 3, 4, 3);
-            groupBox2.Size = new Size(1116, 72);
+            groupBox2.Size = new Size(818, 72);
             groupBox2.TabIndex = 1;
             groupBox2.TabStop = false;
             groupBox2.Text = "🎮 Service Controls";
@@ -357,7 +357,7 @@
             groupBox3.Margin = new Padding(4, 3, 4, 3);
             groupBox3.Name = "groupBox3";
             groupBox3.Padding = new Padding(4, 3, 4, 3);
-            groupBox3.Size = new Size(1116, 69);
+            groupBox3.Size = new Size(818, 69);
             groupBox3.TabIndex = 2;
             groupBox3.TabStop = false;
             groupBox3.Text = "🔍 Search & Filter";
@@ -372,7 +372,7 @@
             groupBox4.Margin = new Padding(4, 3, 4, 3);
             groupBox4.Name = "groupBox4";
             groupBox4.Padding = new Padding(4, 3, 4, 3);
-            groupBox4.Size = new Size(1116, 110);
+            groupBox4.Size = new Size(818, 110);
             groupBox4.TabIndex = 3;
             groupBox4.TabStop = false;
             groupBox4.Text = "📈 Status Summary";
@@ -392,24 +392,24 @@
             dataGridView.RowHeadersWidth = 51;
             dataGridView.RowTemplate.Height = 24;
             dataGridView.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
-            dataGridView.Size = new Size(1120, 277);
+            dataGridView.Size = new Size(822, 277);
             dataGridView.TabIndex = 4;
             // 
             // Form1
             // 
             AutoScaleDimensions = new SizeF(7F, 15F);
             AutoScaleMode = AutoScaleMode.Font;
+            AutoSize = true;
             BackColor = Color.FromArgb(240, 240, 240);
-            ClientSize = new Size(1148, 705);
+            ClientSize = new Size(849, 705);
             Controls.Add(dataGridView);
             Controls.Add(groupBox4);
             Controls.Add(groupBox3);
             Controls.Add(groupBox2);
             Controls.Add(groupBox1);
             Margin = new Padding(4, 3, 4, 3);
-            MinimumSize = new Size(1164, 744);
             Name = "Form1";
-            StartPosition = FormStartPosition.CenterScreen;
+            StartPosition = FormStartPosition.Manual;
             Text = "Interface Pataya - Drug Dispense Monitor";
             totalPanel.ResumeLayout(false);
             successPanel.ResumeLayout(false);
