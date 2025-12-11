@@ -399,7 +399,6 @@ namespace Interface_pattaya
         {
             try
             {
-                // บันทึกเวลาที่เชื่อมต่อสำเร็จ
                 _lastConnectedTime = DateTime.Now;
 
                 connectionStatusLabel.Text = $"Database: 🟢 Connected (Last Connected: {_lastConnectedTime:yyyy-MM-dd HH:mm:ss})";
@@ -407,12 +406,17 @@ namespace Interface_pattaya
                 startStopButton.Enabled = true;
                 startStopButton.BackColor = System.Drawing.Color.FromArgb(52, 152, 219);
 
-                // ⭐ ถ้าก่อนหน้านี้ service กำลังทำงานอยู่ ให้ start อัตโนมัติ
+                // อัพเดท Status
+                if (!_isServiceRunning)
+                {
+                    UpdateStatus("⏹ Stopped - Ready to start");
+                }
+
                 if (_wasServiceRunningBeforeDisconnect)
                 {
                     _logger?.LogInfo("🔄 Auto-restarting service after database reconnection");
                     StartService();
-                    _wasServiceRunningBeforeDisconnect = false; // reset flag
+                    _wasServiceRunningBeforeDisconnect = false;
                 }
 
                 _logger?.LogInfo($"UI updated - database connected at {_lastConnectedTime:yyyy-MM-dd HH:mm:ss}");
@@ -427,7 +431,6 @@ namespace Interface_pattaya
         {
             try
             {
-                // ⭐ บันทึกสถานะว่า service กำลังทำงานหรือไม่ ก่อน disconnect
                 if (_isServiceRunning)
                 {
                     _wasServiceRunningBeforeDisconnect = true;
@@ -448,6 +451,9 @@ namespace Interface_pattaya
                 startStopButton.Enabled = false;
                 startStopButton.BackColor = System.Drawing.Color.Gray;
 
+                // อัพเดท Status
+                UpdateStatus("🔴 Database Disconnected - Service stopped");
+
                 _logger?.LogInfo($"UI updated - database disconnected at {disconnectTime:yyyy-MM-dd HH:mm:ss}");
             }
             catch (Exception ex)
@@ -455,7 +461,17 @@ namespace Interface_pattaya
                 _logger?.LogError("Error updating disconnected UI", ex);
             }
         }
-        
+        private void UpdateStatus(string status)
+        {
+            if (statusLabel.InvokeRequired)
+            {
+                statusLabel.Invoke(new Action<string>(UpdateStatus), status);
+                return;
+            }
+            statusLabel.Text = $"Status: {status}";
+            _logger?.LogInfo($"Status: {status}");
+        }
+
 
         private void UpdateUIState()
         {
@@ -522,7 +538,7 @@ namespace Interface_pattaya
                 {
                     startStopButton.Text = "⏹ Stop";
                     startStopButton.BackColor = System.Drawing.Color.FromArgb(231, 76, 60);
-                    statusLabel.Text = "Status: ▶ Running";
+                    UpdateStatus("▶ Running - Waiting for data...");
                 });
 
                 _logger.LogInfo("Service started");
@@ -551,7 +567,7 @@ namespace Interface_pattaya
                 {
                     startStopButton.Text = "▶ Start";
                     startStopButton.BackColor = System.Drawing.Color.FromArgb(52, 152, 219);
-                    statusLabel.Text = "Status: ⏹ Stopped";
+                    UpdateStatus("⏹ Stopped");
                 });
 
                 _logger.LogInfo("Service stopped");
@@ -572,22 +588,38 @@ namespace Interface_pattaya
                     loopCount++;
                     _logger?.LogInfo($"Processing Loop #{loopCount}");
 
+                    // ⭐ แสดง Status กำลังตรวจสอบ
+                    this.Invoke((MethodInvoker)delegate
+                    {
+                        UpdateStatus($"▶ Running - Checking for new data... (Loop #{loopCount})");
+                    });
+
                     var (successCount, failedCount, errors) = await _dataService.ProcessAndSendDataAsync();
+
+                    int totalFound = successCount + failedCount;
 
                     this.Invoke((MethodInvoker)delegate
                     {
                         lastCheckLabel.Text = $"Last Check: {DateTime.Now:HH:mm:ss}";
 
-                        if (successCount > 0)
+                        // ⭐ แสดง Status ตามผลลัพธ์
+                        if (totalFound > 0)
                         {
-                            lastSuccessLabel.Text = $"Last Success: {DateTime.Now:HH:mm:ss} ({successCount} items)";
+                            UpdateStatus($"▶ Running - Processed {totalFound} items ({successCount} success, {failedCount} failed)");
+
+                            if (successCount > 0)
+                            {
+                                lastSuccessLabel.Text = $"Last Success: {DateTime.Now:HH:mm:ss} ({successCount} items)";
+                            }
+
+                            lastFoundLabel.Text = $"Last Found: {totalFound} items";
+                        }
+                        else
+                        {
+                            UpdateStatus($"▶ Running - No new data found");
                         }
 
-                        if (successCount > 0 || failedCount > 0)
-                        {
-                            lastFoundLabel.Text = $"Last Found: {successCount + failedCount} items";
-                        }
-
+                        // โหลดข้อมูลใหม่
                         Task.Run(() => LoadDataGridViewAsync(DateTime.Now.ToString("yyyy-MM-dd")));
                     });
 
@@ -598,8 +630,20 @@ namespace Interface_pattaya
 
                     _logger.LogInfo($"Loop #{loopCount} Complete: {successCount} success, {failedCount} failed");
 
-                    int delayMs = (_appConfig?.ProcessingIntervalSeconds ?? 5) * 1000;
-                    await Task.Delay(delayMs, cancellationToken);
+                    // ⭐ แสดง Status รอรอบถัดไป
+                    int delaySeconds = _appConfig?.ProcessingIntervalSeconds ?? 5;
+
+                    for (int i = delaySeconds; i > 0; i--)
+                    {
+                        if (cancellationToken.IsCancellationRequested) break;
+
+                        this.Invoke((MethodInvoker)delegate
+                        {
+                            UpdateStatus($"▶ Running - Waiting {i}s for next check...");
+                        });
+
+                        await Task.Delay(1000, cancellationToken);
+                    }
                 }
                 catch (OperationCanceledException)
                 {
@@ -609,6 +653,12 @@ namespace Interface_pattaya
                 catch (Exception ex)
                 {
                     _logger?.LogError("Error in process loop", ex);
+
+                    this.Invoke((MethodInvoker)delegate
+                    {
+                        UpdateStatus($"⚠️ Error - Retrying in 5s...");
+                    });
+
                     await Task.Delay(5000, cancellationToken);
                 }
             }
@@ -621,19 +671,21 @@ namespace Interface_pattaya
             try
             {
                 string selectedDate = dateTimePicker.Value.ToString("yyyy-MM-dd");
-                string searchText = searchTextBox.Text.Trim(); // ดึงค่าจาก textbox
+                string searchText = searchTextBox.Text.Trim();
 
                 _logger?.LogInfo($"🔍 Search initiated - Date: {selectedDate}, Search: '{searchText}'");
 
-                // ⭐ เรียก debug ก่อน
-                await DebugDatabaseQuery(selectedDate);
+                UpdateStatus($"🔍 Searching for '{searchText}' on {selectedDate}...");
 
-                // ⭐ แล้วโหลดข้อมูลพร้อมส่ง searchText
+                await DebugDatabaseQuery(selectedDate);
                 await LoadDataGridViewAsync(selectedDate, searchText);
+
+                UpdateStatus($"✅ Search completed");
             }
             catch (Exception ex)
             {
                 _logger?.LogError("Error in SearchButton_Click", ex);
+                UpdateStatus("❌ Search failed");
                 ShowAutoClosingMessageBox($"ข้อผิดพลาด: {ex.Message}", "ข้อผิดพลาด");
             }
         }
@@ -645,14 +697,18 @@ namespace Interface_pattaya
                 _logger?.LogInfo("Refresh button clicked");
                 _currentStatusFilter = "All";
 
-                // ⭐ ล้าง searchTextBox ด้วย
                 searchTextBox.Clear();
 
+                UpdateStatus("🔄 Refreshing data...");
+
                 await LoadDataGridViewAsync(dateTimePicker.Value.ToString("yyyy-MM-dd"), "");
+
+                UpdateStatus("✅ Data refreshed");
             }
             catch (Exception ex)
             {
                 _logger?.LogError("Error in RefreshButton_Click", ex);
+                UpdateStatus("❌ Refresh failed");
                 ShowAutoClosingMessageBox($"ข้อผิดพลาด: {ex.Message}", "ข้อผิดพลาด");
             }
         }
@@ -722,20 +778,26 @@ namespace Interface_pattaya
                     return;
                 }
 
-                // ⭐ อัพเดท UI ว่ากำลังโหลด
+                // ⭐ อัพเดท Status ว่ากำลังโหลด
                 if (this.InvokeRequired)
                 {
                     this.Invoke((MethodInvoker)delegate
                     {
-                        statusLabel.Text = "Status: ⏳ Loading data...";
+                        if (!_isServiceRunning) // ถ้าไม่ได้ running ให้แสดง loading
+                        {
+                            UpdateStatus("⏳ Loading data...");
+                        }
                     });
                 }
                 else
                 {
-                    statusLabel.Text = "Status: ⏳ Loading data...";
+                    if (!_isServiceRunning)
+                    {
+                        UpdateStatus("⏳ Loading data...");
+                    }
                 }
 
-                // ⭐ ดึงข้อมูลจากฐานข้อมูล พร้อมส่ง searchText
+                // ⭐ ดึงข้อมูลจากฐานข้อมูล
                 var data = await _dataService.GetPrescriptionDataAsync(queryDate, searchText);
 
                 _logger?.LogInfo($"📊 [DEBUG] Retrieved {data.Count} records from database");
@@ -746,11 +808,22 @@ namespace Interface_pattaya
                     this.Invoke((MethodInvoker)delegate
                     {
                         UpdateGridView(data);
+
+                        // ⭐ อัพเดท Status หลังโหลดเสร็จ
+                        if (!_isServiceRunning)
+                        {
+                            UpdateStatus($"✅ Loaded {data.Count} records");
+                        }
                     });
                 }
                 else
                 {
                     UpdateGridView(data);
+
+                    if (!_isServiceRunning)
+                    {
+                        UpdateStatus($"✅ Loaded {data.Count} records");
+                    }
                 }
             }
             catch (Exception ex)
@@ -761,15 +834,18 @@ namespace Interface_pattaya
                 {
                     this.Invoke((MethodInvoker)delegate
                     {
+                        UpdateStatus($"❌ Error loading data");
                         ShowAutoClosingMessageBox($"ข้อผิดพลาด: {ex.Message}", "ข้อผิดพลาด");
                     });
                 }
                 else
                 {
+                    UpdateStatus($"❌ Error loading data");
                     ShowAutoClosingMessageBox($"ข้อผิดพลาด: {ex.Message}", "ข้อผิดพลาด");
                 }
             }
         }
+
         private void UpdateGridView(List<GridViewDataModel> data)
         {
             try
@@ -785,7 +861,6 @@ namespace Interface_pattaya
                 {
                     try
                     {
-                        // ⭐ แปลง Status ให้ถูกต้อง
                         string displayStatus = item.Status == "1" ? "Success" :
                                               (item.Status == "3" ? "Failed" : "Pending");
                         string formattedPrescriptionDate = FormatPrescriptionDate(item.Prescriptiondate);
@@ -800,7 +875,6 @@ namespace Interface_pattaya
 
                         addedCount++;
 
-                        // ⭐ Log แถวแรกเพื่อ debug
                         if (addedCount == 1)
                         {
                             _logger?.LogInfo($"📄 [DEBUG] First row: Rx={item.PrescriptionNo}, HN={item.HN}, Status={item.Status}→{displayStatus}");
@@ -814,13 +888,9 @@ namespace Interface_pattaya
 
                 _logger?.LogInfo($"✅ [DEBUG] Added {addedCount}/{data.Count} rows successfully");
 
-                // ⭐ เรียงลำดับข้อมูล
                 _filteredDataView.Sort = "[Time Check] DESC";
-
-                // ⭐ อัพเดทสรุปยอด
                 UpdateSummaryCounts();
 
-                // ⭐ Refresh DataGridView
                 if (dataGridView.DataSource == null)
                 {
                     _logger?.LogWarning("⚠️ [DEBUG] DataGridView.DataSource is NULL, setting it now");
@@ -831,13 +901,22 @@ namespace Interface_pattaya
                     dataGridView.Refresh();
                 }
 
-                statusLabel.Text = _isServiceRunning ? "Status: ▶ Running" : "Status: ⏹ Stopped";
+                // ⭐ อัพเดท Status ให้กลับไปเป็นสถานะปกติ
+                if (_isServiceRunning)
+                {
+                    UpdateStatus($"▶ Running - Grid updated with {addedCount} records");
+                }
+                else
+                {
+                    UpdateStatus($"⏹ Stopped - Showing {addedCount} records");
+                }
 
                 _logger?.LogInfo($"✅ Grid loaded with {addedCount} rows, Total rows in table: {_processedDataTable.Rows.Count}");
             }
             catch (Exception ex)
             {
                 _logger?.LogError("❌ Error in UpdateGridView", ex);
+                UpdateStatus("❌ Error updating grid");
             }
         }
         // ⭐ Update Summary Counts from DataTable
