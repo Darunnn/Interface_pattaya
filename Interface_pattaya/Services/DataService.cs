@@ -30,7 +30,7 @@ namespace Interface_pattaya.Services
         }
         private string ToNull(string value)
         {
-            return string.IsNullOrWhiteSpace(value) ? null : value;
+            return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
         }
         public async Task<(int success, int failed, List<string> errors)> ProcessAndSendDataAsync()
         {
@@ -445,93 +445,93 @@ namespace Interface_pattaya.Services
         }
 
         // ⭐ เก็บ method นี้ไว้สำหรับกรณีที่ต้องการส่งทีละรายการ (ถ้ามี API อื่น)
-        public async Task<(bool success, string message)> SendToApiWithRetryAsync(PrescriptionBodyRequest prescription, int maxRetries = 3)
-        {
-            for (int attempt = 1; attempt <= maxRetries; attempt++)
-            {
-                try
-                {
-                    _logger?.LogInfo($"📤 API Attempt {attempt}/{maxRetries} - Rx: {prescription.f_prescriptionno}");
-                    var (success, message) = await SendToApiAsync(prescription);
+        //public async Task<(bool success, string message)> SendToApiWithRetryAsync(PrescriptionBodyRequest prescription, int maxRetries = 3)
+        //{
+        //    for (int attempt = 1; attempt <= maxRetries; attempt++)
+        //    {
+        //        try
+        //        {
+        //            _logger?.LogInfo($"📤 API Attempt {attempt}/{maxRetries} - Rx: {prescription.f_prescriptionno}");
+        //            var (success, message) = await SendToApiAsync(prescription);
 
-                    if (success)
-                    {
-                        _logger?.LogInfo($"✅ API Success on attempt {attempt}");
-                        return (true, message);
-                    }
+        //            if (success)
+        //            {
+        //                _logger?.LogInfo($"✅ API Success on attempt {attempt}");
+        //                return (true, message);
+        //            }
 
-                    _logger?.LogWarning($"⚠️ Attempt {attempt} failed: {message}");
+        //            _logger?.LogWarning($"⚠️ Attempt {attempt} failed: {message}");
 
-                    if (attempt < maxRetries)
-                    {
-                        _logger?.LogInfo($"⏳ Waiting 5 seconds before retry...");
-                        await Task.Delay(5000);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger?.LogWarning($"⚠️ Attempt {attempt} exception: {ex.Message}");
-                    if (attempt < maxRetries)
-                    {
-                        await Task.Delay(5000);
-                    }
-                }
-            }
+        //            if (attempt < maxRetries)
+        //            {
+        //                _logger?.LogInfo($"⏳ Waiting 5 seconds before retry...");
+        //                await Task.Delay(5000);
+        //            }
+        //        }
+        //        catch (Exception ex)
+        //        {
+        //            _logger?.LogWarning($"⚠️ Attempt {attempt} exception: {ex.Message}");
+        //            if (attempt < maxRetries)
+        //            {
+        //                await Task.Delay(5000);
+        //            }
+        //        }
+        //    }
 
-            _logger?.LogError($"❌ API Failed after {maxRetries} attempts - Rx: {prescription.f_prescriptionno}");
-            return (false, $"Failed after {maxRetries} retry attempts");
-        }
+        //    _logger?.LogError($"❌ API Failed after {maxRetries} attempts - Rx: {prescription.f_prescriptionno}");
+        //    return (false, $"Failed after {maxRetries} retry attempts");
+        //}
 
-        public async Task<(bool success, string message)> SendToApiAsync(PrescriptionBodyRequest prescription)
-        {
-            try
-            {
-                var body = new PrescriptionBodyResponse
-                {
-                    data = new[] { prescription }
-                };
+        //public async Task<(bool success, string message)> SendToApiAsync(PrescriptionBodyRequest prescription)
+        //{
+        //    try
+        //    {
+        //        var body = new PrescriptionBodyResponse
+        //        {
+        //            data = new[] { prescription }
+        //        };
 
-                var json = JsonSerializer.Serialize(body, new JsonSerializerOptions
-                {
-                    PropertyNamingPolicy = null,
-                    WriteIndented = true,
-                    Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping // ⭐ ไม่เข้ารหัสภาษาไทย
-                });
+        //        var json = JsonSerializer.Serialize(body, new JsonSerializerOptions
+        //        {
+        //            PropertyNamingPolicy = null,
+        //            WriteIndented = true,
+        //            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping // ⭐ ไม่เข้ารหัสภาษาไทย
+        //        });
 
-                _logger?.LogInfo($"📤 Sending API request to: {_apiUrl}");
-                _logger?.LogInfo($"Payload size: {json.Length} bytes");
+        //        _logger?.LogInfo($"📤 Sending API request to: {_apiUrl}");
+        //        _logger?.LogInfo($"Payload size: {json.Length} bytes");
 
-                var content = new StringContent(json, Encoding.UTF8, "application/json");
-                var response = await _httpClient.PostAsync(_apiUrl, content);
+        //        var content = new StringContent(json, Encoding.UTF8, "application/json");
+        //        var response = await _httpClient.PostAsync(_apiUrl, content);
 
-                if (response.IsSuccessStatusCode)
-                {
-                    var responseContent = await response.Content.ReadAsStringAsync();
-                    _logger?.LogInfo($"✓ API Response (200): {responseContent.Substring(0, Math.Min(200, responseContent.Length))}");
+        //        if (response.IsSuccessStatusCode)
+        //        {
+        //            var responseContent = await response.Content.ReadAsStringAsync();
+        //            _logger?.LogInfo($"✓ API Response (200): {responseContent.Substring(0, Math.Min(200, responseContent.Length))}");
 
-                    return (true, responseContent);
-                }
-                else
-                {
-                    var errorContent = await response.Content.ReadAsStringAsync();
-                    var errorMsg = $"API Error {(int)response.StatusCode}: {response.ReasonPhrase}";
-                    _logger?.LogWarning($"❌ {errorMsg}");
-                    _logger?.LogWarning($"Response: {errorContent.Substring(0, Math.Min(500, errorContent.Length))}");
+        //            return (true, responseContent);
+        //        }
+        //        else
+        //        {
+        //            var errorContent = await response.Content.ReadAsStringAsync();
+        //            var errorMsg = $"API Error {(int)response.StatusCode}: {response.ReasonPhrase}";
+        //            _logger?.LogWarning($"❌ {errorMsg}");
+        //            _logger?.LogWarning($"Response: {errorContent.Substring(0, Math.Min(500, errorContent.Length))}");
 
-                    return (false, errorMsg);
-                }
-            }
-            catch (HttpRequestException ex)
-            {
-                _logger?.LogError("❌ HTTP Request Exception", ex);
-                return (false, $"HTTP Error: {ex.Message}");
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogError("❌ Unexpected Exception in SendToApiAsync", ex);
-                return (false, $"Exception: {ex.Message}");
-            }
-        }
+        //            return (false, errorMsg);
+        //        }
+        //    }
+        //    catch (HttpRequestException ex)
+        //    {
+        //        _logger?.LogError("❌ HTTP Request Exception", ex);
+        //        return (false, $"HTTP Error: {ex.Message}");
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        _logger?.LogError("❌ Unexpected Exception in SendToApiAsync", ex);
+        //        return (false, $"Exception: {ex.Message}");
+        //    }
+        //}
 
         private async Task UpdateDispenseStatusAsync(string prescriptionNo, string prescriptionDate, string status)
         {
@@ -609,7 +609,7 @@ namespace Interface_pattaya.Services
 
             if (hasSearchText)
             {
-                query += @" AND (f_hn LIKE @SearchText OR f_prescriptionnohis LIKE @SearchText)";
+                query += @" AND (f_hn LIKE @SearchText OR f_prescriptionnohis LIKE @SearchText OR f_referenceCode LIKE @SearchText)";
             }
 
             query += @" ORDER BY f_prescriptionnohis, f_seq";
