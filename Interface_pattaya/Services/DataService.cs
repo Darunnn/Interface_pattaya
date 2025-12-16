@@ -104,7 +104,7 @@ namespace Interface_pattaya.Services
                        OR f_dispensestatus_conhis = '' 
                        OR f_dispensestatus_conhis = '0')
                 AND SUBSTRING(f_prescriptiondate, 1, 8) = @CurrentDate
-                ORDER BY f_lastmodified, f_prescriptionnohis, f_seq";
+                ORDER BY f_lastmodified, f_prescriptionnohis, f_seq limit 100";
 
             _logger?.LogInfo($"📥 Starting batch processing for date: {currentDate}, Batch Size: {_batchSize}");
 
