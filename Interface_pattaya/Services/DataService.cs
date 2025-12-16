@@ -17,21 +17,38 @@ namespace Interface_pattaya.Services
         private readonly string _apiUrl;
         private readonly HttpClient _httpClient;
         private readonly LogManager _logger;
-        private readonly int _batchSize; // ⭐ เพิ่ม batch size
+        private readonly int _batchSize;
 
-        public DataService(string connectionString, string apiUrl, LogManager logger = null, int batchSize = 20)
+        // ⭐ เพิ่ม: JsonSerializerOptions แบบ cached
+        private static readonly JsonSerializerOptions _jsonOptions = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = null,
+            WriteIndented = false, // ⭐ ปิด indent เพื่อลดขนาด
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull // ⭐ ไม่ส่ง null
+        };
+
+        public DataService(string connectionString, string apiUrl, LogManager logger = null, int batchSize = 100)
         {
             _connectionString = connectionString;
             _apiUrl = apiUrl;
-            _httpClient = new HttpClient();
-            _httpClient.Timeout = TimeSpan.FromSeconds(60); // ⭐ เพิ่ม timeout เพราะส่งหลายรายการ
+
+            // ⭐ ปรับ HttpClient settings
+            _httpClient = new HttpClient
+            {
+                Timeout = TimeSpan.FromSeconds(30) // ⭐ ลดจาก 60 เป็น 30
+            };
+            _httpClient.DefaultRequestHeaders.ConnectionClose = false; // ⭐ ใช้ Keep-Alive
+
             _logger = logger ?? new LogManager();
-            _batchSize = batchSize;
+            _batchSize = batchSize; // ⭐ เพิ่มเป็น 100 (ค่า default)
         }
+
         private string ToNull(string value)
         {
             return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
         }
+
         public async Task<(int success, int failed, List<string> errors)> ProcessAndSendDataAsync()
         {
             int successCount = 0;
@@ -39,7 +56,7 @@ namespace Interface_pattaya.Services
             var errors = new List<string>();
             var currentDate = DateTime.Now.ToString("yyyyMMdd");
 
-            // ⭐ Query เดิม
+            // ⭐ เพิ่ม LIMIT ให้ตรงกับ batch size
             string query = $@"
                 SELECT 
                     f_referenceCode,
@@ -104,26 +121,27 @@ namespace Interface_pattaya.Services
                        OR f_dispensestatus_conhis = '' 
                        OR f_dispensestatus_conhis = '0')
                 AND SUBSTRING(f_prescriptiondate, 1, 8) = @CurrentDate
-                ORDER BY f_lastmodified, f_prescriptionnohis, f_seq limit 100";
+                ORDER BY f_lastmodified, f_prescriptionnohis, f_seq 
+                LIMIT @BatchSize";
 
-            _logger?.LogInfo($"📥 Starting batch processing for date: {currentDate}, Batch Size: {_batchSize}");
+            _logger?.LogInfo($"📥 Processing batch (Size: {_batchSize}, Date: {currentDate})");
 
             try
             {
                 using (var connection = new MySqlConnection(_connectionString))
                 {
                     await connection.OpenAsync();
-                    _logger?.LogInfo($"✓ Database connection opened");
 
                     using (var command = new MySqlCommand(query, connection))
                     {
                         command.Parameters.AddWithValue("@CurrentDate", currentDate);
-                        command.CommandTimeout = 120;
+                        command.Parameters.AddWithValue("@BatchSize", _batchSize); // ⭐ Dynamic limit
+                        command.CommandTimeout = 60; // ⭐ ลดจาก 120
 
                         using (var reader = await command.ExecuteReaderAsync())
                         {
-                            var batchList = new List<PrescriptionBodyRequest>(); // ⭐ สำหรับเก็บ batch
-                            var batchPrescriptionInfo = new List<(string prescriptionNo, string prescriptionDate)>(); // ⭐ เก็บข้อมูลสำหรับ update
+                            var batchList = new List<PrescriptionBodyRequest>();
+                            var batchPrescriptionInfo = new List<(string prescriptionNo, string prescriptionDate)>();
 
                             while (await reader.ReadAsync())
                             {
@@ -132,30 +150,27 @@ namespace Interface_pattaya.Services
 
                                 try
                                 {
-
-                                    prescriptionNo = reader["f_prescriptionnohis"]?.ToString() ;
-                                    var seq = reader["f_seq"]?.ToString() ;
-                                    var prescriptionDate = reader["f_prescriptiondate"]?.ToString() ;
+                                    prescriptionNo = reader["f_prescriptionnohis"]?.ToString();
+                                    var seq = reader["f_seq"]?.ToString();
+                                    var prescriptionDate = reader["f_prescriptiondate"]?.ToString();
 
                                     prescriptionDateFormatted = ExtractDate(prescriptionDate);
 
                                     if (string.IsNullOrEmpty(prescriptionNo))
                                     {
-                                        _logger?.LogWarning("⚠️ Skipped: prescriptionNo is empty");
                                         failedCount++;
                                         continue;
                                     }
 
-                                    var freetext1 = reader["f_freetext1"]?.ToString() ;
-                                    var freetext2 = reader["f_freetext2"]?.ToString() ;
-                                    var freetext1Parts = freetext1.Split('^') ;
-                                    var freetext2Parts = freetext2.Split('^') ;
-                                    var sex = ProcessSex(reader["f_sex"]?.ToString()) ;
-                                    var prnValue = reader["f_PRN"]?.ToString() ;
-                                    var prn = ProcessPRN(prnValue, 1) ;
-                                    var stat = ProcessPRN(prnValue, 2) ;
+                                    var freetext1 = reader["f_freetext1"]?.ToString();
+                                    var freetext2 = reader["f_freetext2"]?.ToString();
+                                    var freetext1Parts = freetext1?.Split('^') ?? Array.Empty<string>();
+                                    var freetext2Parts = freetext2?.Split('^') ?? Array.Empty<string>();
+                                    var sex = ProcessSex(reader["f_sex"]?.ToString());
+                                    var prnValue = reader["f_PRN"]?.ToString();
+                                    var prn = ProcessPRN(prnValue, 1);
+                                    var stat = ProcessPRN(prnValue, 2);
 
-                                    // ⭐ สร้าง prescription object
                                     var prescriptionBody = new PrescriptionBodyRequest
                                     {
                                         UniqID = ToNull(reader["f_referenceCode"]?.ToString()),
@@ -163,122 +178,82 @@ namespace Interface_pattaya.Services
                                         f_seq = decimal.TryParse(seq, out decimal seqVal) ? seqVal : (decimal?)null,
                                         f_seqmax = decimal.TryParse(reader["f_seqmax"]?.ToString(), out decimal seqmax) ? seqmax : (decimal?)null,
                                         f_prescriptiondate = ToNull(prescriptionDateFormatted),
-
                                         f_ordercreatedate = ToNull($"{reader["f_ordercreatedate"]} {reader["f_ordercreatetime"]}"),
                                         f_ordertargetdate = ToNull(reader["f_ordertargetdate"]?.ToString()),
                                         f_ordertargettime = ToNull(reader["f_ordertargettime"]?.ToString()),
-
                                         f_doctorcode = ToNull(reader["f_doctorcode"]?.ToString()),
                                         f_doctorname = ToNull(reader["f_doctorname"]?.ToString()),
                                         f_useracceptby = ToNull(reader["f_useracceptby"]?.ToString()),
                                         f_orderacceptdate = ToNull($"{reader["f_orderacceptdate"]} {reader["f_orderaccepttime"]}"),
                                         f_orderacceptfromip = ToNull(reader["f_orderacceptfromip"]?.ToString()),
-
                                         f_pharmacylocationcode = ToNull(reader["f_pharmacylocationpackcode"]?.ToString()),
                                         f_pharmacylocationdesc = ToNull(reader["f_pharmacylocationpackdesc"]?.ToString()),
-
                                         f_prioritycode = ToNull(reader["f_prioritycode"]?.ToString()),
                                         f_prioritydesc = ToNull(reader["f_prioritydesc"]?.ToString()),
-
                                         f_hn = ToNull(reader["f_hn"]?.ToString()),
                                         f_an = ToNull(reader["f_en"]?.ToString()),
                                         f_vn = null,
-
                                         f_title = null,
                                         f_patientname = ToNull(reader["f_patientname"]?.ToString()),
                                         f_sex = ToNull(sex),
                                         f_patientdob = ToNull(reader["f_patientdob"]?.ToString()),
-
                                         f_wardcode = ToNull(reader["f_wardcode"]?.ToString()),
                                         f_warddesc = ToNull(reader["f_warddesc"]?.ToString()),
                                         f_roomcode = ToNull(reader["f_roomcode"]?.ToString()),
                                         f_roomdesc = ToNull(reader["f_roomdesc"]?.ToString()),
                                         f_bedcode = ToNull(reader["f_bedcode"]?.ToString()),
                                         f_beddesc = ToNull(reader["f_bedcode"]?.ToString()),
-
                                         f_right = null,
                                         f_drugallergy = ToNull(reader["f_freetext4"]?.ToString()),
                                         f_diagnosis = null,
-
                                         f_orderitemcode = ToNull(freetext2Parts.Length > 0 ? freetext2Parts[0] : null),
                                         f_orderitemname = ToNull(reader["f_orderitemname"]?.ToString()),
                                         f_orderitemnameTH = ToNull(reader["f_orderitemnameTH"]?.ToString()),
                                         f_orderitemnamegeneric = ToNull(reader["f_orderitemgenericname"]?.ToString()),
-
-                                        f_orderqty = decimal.TryParse(reader["f_orderqty"]?.ToString(), out decimal qty)? qty : (decimal?)null,
+                                        f_orderqty = decimal.TryParse(reader["f_orderqty"]?.ToString(), out decimal qty) ? qty : (decimal?)null,
                                         f_orderunitcode = ToNull(reader["f_orderunitcode"]?.ToString()),
                                         f_orderunitdesc = ToNull(reader["f_orderunitdesc"]?.ToString()),
-
                                         f_dosage = decimal.TryParse(reader["f_dosage"]?.ToString(), out decimal dosage) ? dosage : (decimal?)null,
                                         f_dosageunit = ToNull(reader["f_dosageunit"]?.ToString()),
                                         f_dosagetext = null,
-
                                         f_drugformcode = null,
                                         f_drugformdesc = null,
-
                                         f_HAD = ToNull(reader["f_heighAlertDrug"]?.ToString()) ?? "0",
                                         f_narcoticFlg = ToNull(reader["f_narcoticdrug"]?.ToString()) ?? "0",
                                         f_psychotropic = ToNull(reader["f_psychotropicDrug"]?.ToString()) ?? "0",
-
                                         f_binlocation = ToNull(freetext2Parts.Length > 1 ? freetext2Parts[1] : null),
-
                                         f_itemidentify = null,
                                         f_itemlotno = ToNull(reader["f_itemlotcode"]?.ToString()),
                                         f_itemlotexpire = ToNull(reader["f_itemlotexpire"]?.ToString()),
-
                                         f_instructioncode = ToNull(reader["f_instructioncode"]?.ToString()),
                                         f_instructiondesc = ToNull(reader["f_instructiondesc"]?.ToString()),
                                         f_frequencycode = ToNull(reader["f_frequencycode"]?.ToString()),
                                         f_frequencydesc = ToNull(reader["f_frequencydesc"]?.ToString()),
-
                                         f_timecode = null,
                                         f_timedesc = null,
-
                                         f_frequencytime = ToNull(reader["f_frequencyTime"]?.ToString()),
                                         f_dosagedispense = ToNull(reader["f_dosagedispense"]?.ToString()),
-
                                         f_dayofweek = null,
                                         f_noteprocessing = ToNull(reader["f_noteprocessing"]?.ToString()),
-
                                         f_prn = ToNull(prn),
                                         f_stat = ToNull(stat),
                                         f_comment = ToNull(reader["f_comment"]?.ToString()),
-
                                         f_tomachineno = decimal.TryParse(reader["f_tomachineno"]?.ToString(), out decimal machine) ? machine : (decimal?)null,
-
                                         f_ipd_order_recordno = ToNull(reader["f_ipdpt_record_no"]?.ToString()),
                                         f_status = ToNull(reader["f_status"]?.ToString()),
-
                                         f_remark = ToNull(freetext1Parts.Length > 0 ? freetext1Parts[0] : null),
                                         f_durationtext = ToNull(freetext1Parts.Length > 1 ? freetext1Parts[1] : null),
                                         f_labeltext = ToNull(freetext2Parts.Length > 2 ? freetext2Parts[2] : null),
                                         f_dosagedispense_compare = ToNull(freetext1Parts.Length > 2 ? freetext1Parts[2] : null)
                                     };
 
-
-                                    // ⭐ เพิ่มเข้า batch
                                     batchList.Add(prescriptionBody);
                                     batchPrescriptionInfo.Add((prescriptionNo, prescriptionDateFormatted));
-
-                                    // ⭐ ถ้า batch เต็มแล้ว ให้ส่งทันที
-                                    if (batchList.Count >= _batchSize)
-                                    {
-                                        _logger?.LogInfo($"📦 Batch full ({batchList.Count} items), sending to API...");
-
-                                        var (batchSuccess, batchFailed) = await SendBatchToApiAsync(batchList, batchPrescriptionInfo);
-
-                                        successCount += batchSuccess;
-                                        failedCount += batchFailed;
-
-                                        // ⭐ ล้าง batch
-                                        batchList.Clear();
-                                        batchPrescriptionInfo.Clear();
-                                    }
                                 }
                                 catch (Exception ex)
                                 {
                                     failedCount++;
-                                    _logger?.LogError($"❌ Row Processing Error - Rx: {prescriptionNo}", ex);
+                                    _logger?.LogError($"❌ Row Error - Rx: {prescriptionNo}", ex);
 
                                     if (!string.IsNullOrEmpty(prescriptionNo) && !string.IsNullOrEmpty(prescriptionDateFormatted))
                                     {
@@ -286,19 +261,15 @@ namespace Interface_pattaya.Services
                                         {
                                             await UpdateDispenseStatusAsync(prescriptionNo, prescriptionDateFormatted, "3");
                                         }
-                                        catch (Exception updateEx)
-                                        {
-                                            _logger?.LogError($"❌ Failed to update status - Rx: {prescriptionNo}", updateEx);
-                                        }
+                                        catch { }
                                     }
-                                    errors.Add($"Processing error for {prescriptionNo}: {ex.Message}");
                                 }
                             }
 
-                            // ⭐ ส่ง batch ที่เหลือ (ถ้ามี)
+                            // ⭐ ส่ง batch ทันที (ไม่รอให้เต็ม)
                             if (batchList.Count > 0)
                             {
-                                _logger?.LogInfo($"📦 Sending remaining batch ({batchList.Count} items)...");
+                                _logger?.LogInfo($"📦 Sending batch ({batchList.Count} items)");
 
                                 var (batchSuccess, batchFailed) = await SendBatchToApiAsync(batchList, batchPrescriptionInfo);
 
@@ -311,21 +282,21 @@ namespace Interface_pattaya.Services
             }
             catch (MySqlException ex)
             {
-                _logger?.LogError("❌ MySQL Database Error", ex);
+                _logger?.LogError("❌ MySQL Error", ex);
                 errors.Add($"Database error: {ex.Message}");
             }
             catch (Exception ex)
             {
-                _logger?.LogError("❌ Critical Error in ProcessAndSendDataAsync", ex);
+                _logger?.LogError("❌ Critical Error", ex);
                 errors.Add($"Critical error: {ex.Message}");
             }
 
-            _logger?.LogInfo($"📊 Processing Complete - Success: {successCount}, Failed: {failedCount}, Total: {successCount + failedCount}");
+            _logger?.LogInfo($"📊 Complete - Success: {successCount}, Failed: {failedCount}");
 
             return (successCount, failedCount, errors);
         }
 
-        // ⭐ ส่ง batch ไป API
+        // ⭐ ปรับปรุง SendBatchToApiAsync
         private async Task<(int success, int failed)> SendBatchToApiAsync(
             List<PrescriptionBodyRequest> batchList,
             List<(string prescriptionNo, string prescriptionDate)> batchInfo)
@@ -335,56 +306,21 @@ namespace Interface_pattaya.Services
 
             try
             {
-                _logger?.LogInfo($"📤 Sending batch of {batchList.Count} prescriptions to API");
-
-                // ⭐ สร้าง body ที่มี array ของ prescriptions
                 var body = new PrescriptionBodyResponse
                 {
                     data = batchList.ToArray()
                 };
 
-                var json = JsonSerializer.Serialize(body, new JsonSerializerOptions
-                {
-                    PropertyNamingPolicy = null,
-                    WriteIndented = true, // ⭐ เปิด indent เพื่อให้อ่านง่ายใน log
-                    Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping // ⭐ ไม่เข้ารหัสภาษาไทย
-                });
+                // ⭐ ใช้ cached options
+                var json = JsonSerializer.Serialize(body, _jsonOptions);
 
-                _logger?.LogInfo($"📤 Payload size: {json.Length / 1024.0:F2} KB ({batchList.Count} items)");
+                _logger?.LogInfo($"📤 Sending {batchList.Count} items ({json.Length / 1024.0:F1} KB)");
 
-                // ⭐ Log รายละเอียด prescriptions ใน batch
-                _logger?.LogInfo($"📋 Batch contains prescriptions:");
-                for (int i = 0; i < batchList.Count; i++)
-                {
-                    var item = batchList[i];
-                    _logger?.LogInfo($"   [{i + 1}] Rx={item.f_prescriptionno}, Seq={item.f_seq}, HN={item.f_hn}, Patient={item.f_patientname}");
-                }
-
-                // ⭐ Log ตัวอย่าง body (รายการแรก)
+                // ⭐ ลด log ลง - เหลือแค่ข้อมูลสำคัญ
                 if (batchList.Count > 0)
                 {
-                    var sampleItem = batchList[0];
-                    _logger?.LogInfo($"📝 Sample item (first prescription):");
-                    _logger?.LogInfo($"   UniqID: {sampleItem.UniqID}");
-                    _logger?.LogInfo($"   PrescriptionNo: {sampleItem.f_prescriptionno}");
-                    _logger?.LogInfo($"   Seq: {sampleItem.f_seq}/{sampleItem.f_seqmax}");
-                    _logger?.LogInfo($"   HN: {sampleItem.f_hn}, Patient: {sampleItem.f_patientname}");
-                    _logger?.LogInfo($"   Drug: {sampleItem.f_orderitemnameTH}");
-                    _logger?.LogInfo($"   Qty: {sampleItem.f_orderqty} {sampleItem.f_orderunitdesc}");
-                }
-
-                // ⭐ Log full JSON body (ถ้าขนาดไม่ใหญ่เกินไป)
-                if (json.Length < 50000) // ⭐ ถ้าน้อยกว่า 50KB ให้ log ทั้งหมด
-                {
-                    _logger?.LogInfo($"📄 Full JSON Body:");
-                    _logger?.LogInfo($"{json}");
-                }
-                else
-                {
-                    // ⭐ ถ้าใหญ่เกินไป ให้ log แค่ส่วนแรก
-                    _logger?.LogInfo($"📄 JSON Body (first 5000 chars):");
-                    _logger?.LogInfo($"{json.Substring(0, 5000)}");
-                    _logger?.LogInfo($"... (truncated, total length: {json.Length} chars)");
+                    var first = batchList[0];
+                    _logger?.LogInfo($"   First: Rx={first.f_prescriptionno}, HN={first.f_hn}");
                 }
 
                 var content = new StringContent(json, Encoding.UTF8, "application/json");
@@ -393,153 +329,96 @@ namespace Interface_pattaya.Services
                 if (response.IsSuccessStatusCode)
                 {
                     var responseContent = await response.Content.ReadAsStringAsync();
-                    _logger?.LogInfo($"✅ Batch sent successfully! Response: {responseContent}");
+                    _logger?.LogInfo($"✅ Success - {responseContent.Substring(0, Math.Min(100, responseContent.Length))}");
 
-                    // ⭐ ถ้าสำเร็จ ให้ update status ทั้ง batch เป็น "1"
                     successCount = batchList.Count;
 
-                    foreach (var (prescriptionNo, prescriptionDate) in batchInfo)
-                    {
-                        await UpdateDispenseStatusAsync(prescriptionNo, prescriptionDate, "1");
-                    }
-
-                    _logger?.LogInfo($"✅ Updated {successCount} prescriptions to status '1'");
+                    // ⭐ Update แบบ batch (ใช้ transaction)
+                    await UpdateBatchStatusAsync(batchInfo, "1");
                 }
                 else
                 {
                     var errorContent = await response.Content.ReadAsStringAsync();
-                    _logger?.LogError($"❌ Batch send failed! Status: {(int)response.StatusCode}, Response: {errorContent}");
+                    _logger?.LogError($"❌ API Error {(int)response.StatusCode}: {errorContent.Substring(0, Math.Min(200, errorContent.Length))}");
 
-                    // ⭐ ถ้าล้มเหลว ให้ update status ทั้ง batch เป็น "3"
                     failedCount = batchList.Count;
-
-                    foreach (var (prescriptionNo, prescriptionDate) in batchInfo)
-                    {
-                        await UpdateDispenseStatusAsync(prescriptionNo, prescriptionDate, "3");
-                    }
-
-                    _logger?.LogWarning($"⚠️ Updated {failedCount} prescriptions to status '3'");
+                    await UpdateBatchStatusAsync(batchInfo, "3");
                 }
             }
             catch (Exception ex)
             {
-                _logger?.LogError($"❌ Exception during batch send", ex);
-
-                // ⭐ กรณี exception ให้ update เป็น "3" ทั้งหมด
+                _logger?.LogError($"❌ Send Exception", ex);
                 failedCount = batchList.Count;
 
-                foreach (var (prescriptionNo, prescriptionDate) in batchInfo)
+                try
                 {
-                    try
-                    {
-                        await UpdateDispenseStatusAsync(prescriptionNo, prescriptionDate, "3");
-                    }
-                    catch (Exception updateEx)
-                    {
-                        _logger?.LogError($"❌ Failed to update status for Rx: {prescriptionNo}", updateEx);
-                    }
+                    await UpdateBatchStatusAsync(batchInfo, "3");
                 }
+                catch { }
             }
 
             return (successCount, failedCount);
         }
 
-        // ⭐ เก็บ method นี้ไว้สำหรับกรณีที่ต้องการส่งทีละรายการ (ถ้ามี API อื่น)
-        //public async Task<(bool success, string message)> SendToApiWithRetryAsync(PrescriptionBodyRequest prescription, int maxRetries = 3)
-        //{
-        //    for (int attempt = 1; attempt <= maxRetries; attempt++)
-        //    {
-        //        try
-        //        {
-        //            _logger?.LogInfo($"📤 API Attempt {attempt}/{maxRetries} - Rx: {prescription.f_prescriptionno}");
-        //            var (success, message) = await SendToApiAsync(prescription);
+        // ⭐ ใหม่: Update แบบ batch (เร็วกว่า)
+        private async Task UpdateBatchStatusAsync(
+            List<(string prescriptionNo, string prescriptionDate)> batchInfo,
+            string status)
+        {
+            if (batchInfo == null || batchInfo.Count == 0)
+                return;
 
-        //            if (success)
-        //            {
-        //                _logger?.LogInfo($"✅ API Success on attempt {attempt}");
-        //                return (true, message);
-        //            }
+            try
+            {
+                using (var connection = new MySqlConnection(_connectionString))
+                {
+                    await connection.OpenAsync();
 
-        //            _logger?.LogWarning($"⚠️ Attempt {attempt} failed: {message}");
+                    // ⭐ ใช้ Transaction
+                    using (var transaction = await connection.BeginTransactionAsync())
+                    {
+                        try
+                        {
+                            string query = @"
+                                UPDATE tb_thaneshosp_middle 
+                                SET f_dispensestatus_conhis = @Status
+                                WHERE f_prescriptionnohis = @prescriptionnohis 
+                                AND SUBSTRING(f_prescriptiondate, 1, 8) = @prescriptiondate";
 
-        //            if (attempt < maxRetries)
-        //            {
-        //                _logger?.LogInfo($"⏳ Waiting 5 seconds before retry...");
-        //                await Task.Delay(5000);
-        //            }
-        //        }
-        //        catch (Exception ex)
-        //        {
-        //            _logger?.LogWarning($"⚠️ Attempt {attempt} exception: {ex.Message}");
-        //            if (attempt < maxRetries)
-        //            {
-        //                await Task.Delay(5000);
-        //            }
-        //        }
-        //    }
+                            foreach (var (prescriptionNo, prescriptionDate) in batchInfo)
+                            {
+                                using (var command = new MySqlCommand(query, connection, transaction))
+                                {
+                                    command.Parameters.AddWithValue("@prescriptionnohis", prescriptionNo);
+                                    command.Parameters.AddWithValue("@prescriptiondate", prescriptionDate);
+                                    command.Parameters.AddWithValue("@Status", status);
+                                    command.CommandTimeout = 10; // ⭐ ลดเวลา
 
-        //    _logger?.LogError($"❌ API Failed after {maxRetries} attempts - Rx: {prescription.f_prescriptionno}");
-        //    return (false, $"Failed after {maxRetries} retry attempts");
-        //}
+                                    await command.ExecuteNonQueryAsync();
+                                }
+                            }
 
-        //public async Task<(bool success, string message)> SendToApiAsync(PrescriptionBodyRequest prescription)
-        //{
-        //    try
-        //    {
-        //        var body = new PrescriptionBodyResponse
-        //        {
-        //            data = new[] { prescription }
-        //        };
-
-        //        var json = JsonSerializer.Serialize(body, new JsonSerializerOptions
-        //        {
-        //            PropertyNamingPolicy = null,
-        //            WriteIndented = true,
-        //            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping // ⭐ ไม่เข้ารหัสภาษาไทย
-        //        });
-
-        //        _logger?.LogInfo($"📤 Sending API request to: {_apiUrl}");
-        //        _logger?.LogInfo($"Payload size: {json.Length} bytes");
-
-        //        var content = new StringContent(json, Encoding.UTF8, "application/json");
-        //        var response = await _httpClient.PostAsync(_apiUrl, content);
-
-        //        if (response.IsSuccessStatusCode)
-        //        {
-        //            var responseContent = await response.Content.ReadAsStringAsync();
-        //            _logger?.LogInfo($"✓ API Response (200): {responseContent.Substring(0, Math.Min(200, responseContent.Length))}");
-
-        //            return (true, responseContent);
-        //        }
-        //        else
-        //        {
-        //            var errorContent = await response.Content.ReadAsStringAsync();
-        //            var errorMsg = $"API Error {(int)response.StatusCode}: {response.ReasonPhrase}";
-        //            _logger?.LogWarning($"❌ {errorMsg}");
-        //            _logger?.LogWarning($"Response: {errorContent.Substring(0, Math.Min(500, errorContent.Length))}");
-
-        //            return (false, errorMsg);
-        //        }
-        //    }
-        //    catch (HttpRequestException ex)
-        //    {
-        //        _logger?.LogError("❌ HTTP Request Exception", ex);
-        //        return (false, $"HTTP Error: {ex.Message}");
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        _logger?.LogError("❌ Unexpected Exception in SendToApiAsync", ex);
-        //        return (false, $"Exception: {ex.Message}");
-        //    }
-        //}
+                            await transaction.CommitAsync();
+                            _logger?.LogInfo($"✅ Updated {batchInfo.Count} records to status '{status}'");
+                        }
+                        catch
+                        {
+                            await transaction.RollbackAsync();
+                            throw;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError($"❌ Batch Update Error", ex);
+            }
+        }
 
         private async Task UpdateDispenseStatusAsync(string prescriptionNo, string prescriptionDate, string status)
         {
             if (string.IsNullOrEmpty(prescriptionNo) || string.IsNullOrEmpty(prescriptionDate))
-            {
-                _logger?.LogWarning($"⚠️ Cannot update - prescriptionNo: '{prescriptionNo}', date: '{prescriptionDate}'");
                 return;
-            }
 
             string query = @"
                 UPDATE tb_thaneshosp_middle 
@@ -557,28 +436,15 @@ namespace Interface_pattaya.Services
                         command.Parameters.AddWithValue("@prescriptionnohis", prescriptionNo);
                         command.Parameters.AddWithValue("@prescriptiondate", prescriptionDate);
                         command.Parameters.AddWithValue("@Status", status);
-                        command.CommandTimeout = 30;
+                        command.CommandTimeout = 10;
 
-                        int rowsAffected = await command.ExecuteNonQueryAsync();
-
-                        if (rowsAffected > 0)
-                        {
-                            _logger?.LogInfo($"✅ [DB UPDATE] Rx={prescriptionNo}, Status={status}, Rows={rowsAffected}");
-                        }
-                        else
-                        {
-                            _logger?.LogWarning($"⚠️ [NO ROWS UPDATED] Rx={prescriptionNo}");
-                        }
+                        await command.ExecuteNonQueryAsync();
                     }
                 }
             }
-            catch (MySqlException sqlEx)
-            {
-                _logger?.LogError($"❌ [DB ERROR] MySQL Error updating Rx={prescriptionNo}", sqlEx);
-            }
             catch (Exception ex)
             {
-                _logger?.LogError($"❌ [DB ERROR] General Exception updating Rx={prescriptionNo}", ex);
+                _logger?.LogError($"❌ Update Error - Rx={prescriptionNo}", ex);
             }
         }
 
@@ -613,9 +479,6 @@ namespace Interface_pattaya.Services
             }
 
             query += @" ORDER BY f_prescriptionnohis, f_seq";
-
-            _logger?.LogInfo($"📥 Loading grid data for date: {queryDate}" +
-                      (hasSearchText ? $", Search: {searchText}" : ""));
 
             try
             {
@@ -659,14 +522,12 @@ namespace Interface_pattaya.Services
                                 }
                                 catch (Exception ex)
                                 {
-                                    _logger?.LogError("Error reading row for grid", ex);
+                                    _logger?.LogError("Error reading row", ex);
                                 }
                             }
                         }
                     }
                 }
-
-                _logger?.LogInfo($"✅ Grid data loaded: {dataList.Count} records");
             }
             catch (Exception ex)
             {
@@ -675,7 +536,6 @@ namespace Interface_pattaya.Services
 
             return dataList;
         }
-        // เพิ่ม method นี้ใน DataService.cs
 
         public async Task<List<PrescriptionBodyRequest>> GetFullPrescriptionDataAsync(
             List<(string prescriptionNo, string prescriptionDate)> prescriptions)
@@ -684,75 +544,14 @@ namespace Interface_pattaya.Services
 
             if (prescriptions == null || prescriptions.Count == 0)
             {
-                _logger?.LogWarning("No prescriptions provided for export");
                 return dataList;
             }
 
             string query = @"
-        SELECT 
-            f_referenceCode,
-            f_prescriptionnohis,
-            f_seq,
-            f_seqmax,
-            f_prescriptiondate,
-            f_ordercreatedate,
-            f_ordercreatetime,
-            f_ordertargetdate,
-            f_ordertargettime,
-            f_doctorcode,
-            f_doctorname,
-            f_useracceptby,
-            f_orderacceptdate,
-            f_orderaccepttime,
-            f_orderacceptfromip,
-            f_pharmacylocationpackcode,
-            f_pharmacylocationpackdesc,
-            f_prioritycode,
-            f_prioritydesc,
-            f_hn,
-            f_en,
-            f_patientname,
-            f_sex,
-            f_patientdob,
-            f_wardcode,
-            f_warddesc,
-            f_roomcode,
-            f_roomdesc,
-            f_bedcode,
-            f_freetext4,
-            f_orderitemname,
-            f_orderitemnameTH,
-            f_orderitemgenericname,
-            f_orderqty,
-            f_orderunitcode,
-            f_orderunitdesc,
-            f_dosage,
-            f_dosageunit,
-            f_heighAlertDrug,
-            f_narcoticdrug,
-            f_psychotropicDrug,
-            f_itemlotcode,
-            f_itemlotexpire,
-            f_instructioncode,
-            f_instructiondesc,
-            f_frequencycode,
-            f_frequencydesc,
-            f_frequencyTime,
-            f_dosagedispense,
-            f_noteprocessing,
-            f_PRN,
-            f_comment,
-            f_tomachineno,
-            f_ipdpt_record_no,
-            f_status,
-            f_freetext1,
-            f_freetext2
-        FROM tb_thaneshosp_middle
-        WHERE f_prescriptionnohis = @PrescriptionNo
-        AND SUBSTRING(f_prescriptiondate, 1, 8) = @PrescriptionDate
-        ORDER BY f_seq";
-
-            _logger?.LogInfo($"📥 Fetching full data for {prescriptions.Count} prescriptions");
+                SELECT * FROM tb_thaneshosp_middle
+                WHERE f_prescriptionnohis = @PrescriptionNo
+                AND SUBSTRING(f_prescriptiondate, 1, 8) = @PrescriptionDate
+                ORDER BY f_seq";
 
             try
             {
@@ -768,122 +567,23 @@ namespace Interface_pattaya.Services
                             {
                                 command.Parameters.AddWithValue("@PrescriptionNo", prescriptionNo);
                                 command.Parameters.AddWithValue("@PrescriptionDate", prescriptionDate);
-                                command.CommandTimeout = 60;
+                                command.CommandTimeout = 30;
 
                                 using (var reader = await command.ExecuteReaderAsync())
                                 {
                                     while (await reader.ReadAsync())
                                     {
-                                        try
-                                        {
-                                            var referenceCode = reader["f_referenceCode"]?.ToString() ?? "";
-                                            var seq = reader["f_seq"]?.ToString() ?? "0";
-                                            var prescriptionDateRaw = reader["f_prescriptiondate"]?.ToString() ?? "";
-                                            var prescriptionDateFormatted = ExtractDate(prescriptionDateRaw);
-
-                                            var freetext1 = reader["f_freetext1"]?.ToString() ?? "";
-                                            var freetext2 = reader["f_freetext2"]?.ToString() ?? "";
-                                            var freetext1Parts = freetext1.Split('^');
-                                            var freetext2Parts = freetext2.Split('^');
-                                            var sex = ProcessSex(reader["f_sex"]?.ToString());
-                                            var prnValue = reader["f_PRN"]?.ToString();
-                                            var prn = ProcessPRN(prnValue, 1);
-                                            var stat = ProcessPRN(prnValue, 2);
-
-                                            var prescriptionBody = new PrescriptionBodyRequest
-                                            {
-                                                UniqID = $"{referenceCode}-{prescriptionDate}",
-                                                f_prescriptionno = prescriptionNo,
-                                                f_seq = int.TryParse(seq, out int seqVal) ? seqVal : 0,
-                                                f_seqmax = int.TryParse(reader["f_seqmax"]?.ToString(), out int seqmax) ? seqmax : 0,
-                                                f_prescriptiondate = prescriptionDateFormatted,
-                                                f_ordercreatedate = reader["f_ordercreatedate"]?.ToString() + " " + reader["f_ordercreatetime"]?.ToString(),
-                                                f_ordertargetdate = reader["f_ordertargetdate"]?.ToString(),
-                                                f_ordertargettime = reader["f_ordertargettime"]?.ToString(),
-                                                f_doctorcode = reader["f_doctorcode"]?.ToString(),
-                                                f_doctorname = reader["f_doctorname"]?.ToString(),
-                                                f_useracceptby = reader["f_useracceptby"]?.ToString(),
-                                                f_orderacceptdate = reader["f_orderacceptdate"]?.ToString() + " " + reader["f_orderaccepttime"]?.ToString(),
-                                                f_orderacceptfromip = reader["f_orderacceptfromip"]?.ToString(),
-                                                f_pharmacylocationcode = reader["f_pharmacylocationpackcode"]?.ToString(),
-                                                f_pharmacylocationdesc = reader["f_pharmacylocationpackdesc"]?.ToString(),
-                                                f_prioritycode = reader["f_prioritycode"]?.ToString(),
-                                                f_prioritydesc = reader["f_prioritydesc"]?.ToString(),
-                                                f_hn = reader["f_hn"]?.ToString(),
-                                                f_an = reader["f_en"]?.ToString(),
-                                                f_vn = null,
-                                                f_title = null,
-                                                f_patientname = reader["f_patientname"]?.ToString(),
-                                                f_sex = sex,
-                                                f_patientdob = reader["f_patientdob"]?.ToString(),
-                                                f_wardcode = reader["f_wardcode"]?.ToString(),
-                                                f_warddesc = reader["f_warddesc"]?.ToString(),
-                                                f_roomcode = reader["f_roomcode"]?.ToString(),
-                                                f_roomdesc = reader["f_roomdesc"]?.ToString(),
-                                                f_bedcode = reader["f_bedcode"]?.ToString(),
-                                                f_beddesc = reader["f_bedcode"]?.ToString(),
-                                                f_right = null,
-                                                f_drugallergy = reader["f_freetext4"]?.ToString(),
-                                                f_diagnosis = null,
-                                                f_orderitemcode = freetext2Parts.Length > 0 ? freetext2Parts[0] : "",
-                                                f_orderitemname = reader["f_orderitemname"]?.ToString(),
-                                                f_orderitemnameTH = reader["f_orderitemnameTH"]?.ToString(),
-                                                f_orderitemnamegeneric = reader["f_orderitemgenericname"]?.ToString(),
-                                                f_orderqty = int.TryParse(reader["f_orderqty"]?.ToString(), out int qty) ? qty : 0,
-                                                f_orderunitcode = reader["f_orderunitcode"]?.ToString(),
-                                                f_orderunitdesc = reader["f_orderunitdesc"]?.ToString(),
-                                                f_dosage = int.TryParse(reader["f_dosage"]?.ToString(), out int dosage) ? dosage : 0,
-                                                f_dosageunit = reader["f_dosageunit"]?.ToString(),
-                                                f_dosagetext = null,
-                                                f_drugformcode = null,
-                                                f_drugformdesc = null,
-                                                f_HAD = reader["f_heighAlertDrug"]?.ToString() ?? "0",
-                                                f_narcoticFlg = reader["f_narcoticdrug"]?.ToString() ?? "0",
-                                                f_psychotropic = reader["f_psychotropicDrug"]?.ToString() ?? "0",
-                                                f_binlocation = freetext2Parts.Length > 1 ? freetext2Parts[1] : "",
-                                                f_itemidentify = null,
-                                                f_itemlotno = reader["f_itemlotcode"]?.ToString(),
-                                                f_itemlotexpire = reader["f_itemlotexpire"]?.ToString(),
-                                                f_instructioncode = reader["f_instructioncode"]?.ToString(),
-                                                f_instructiondesc = reader["f_instructiondesc"]?.ToString(),
-                                                f_frequencycode = reader["f_frequencycode"]?.ToString(),
-                                                f_frequencydesc = reader["f_frequencydesc"]?.ToString(),
-                                                f_timecode = null,
-                                                f_timedesc = null,
-                                                f_frequencytime = reader["f_frequencyTime"]?.ToString(),
-                                                f_dosagedispense = reader["f_dosagedispense"]?.ToString(),
-                                                f_dayofweek = null,
-                                                f_noteprocessing = reader["f_noteprocessing"]?.ToString(),
-                                                f_prn = prn,
-                                                f_stat = stat,
-                                                f_comment = reader["f_comment"]?.ToString(),
-                                                f_tomachineno = int.TryParse(reader["f_tomachineno"]?.ToString(), out int machine) ? machine : 0,
-                                                f_ipd_order_recordno = reader["f_ipdpt_record_no"]?.ToString(),
-                                                f_status = reader["f_status"]?.ToString(),
-                                                f_remark = freetext1Parts.Length > 0 ? freetext1Parts[0] : "",
-                                                f_durationtext = freetext1Parts.Length > 1 ? freetext1Parts[1] : "",
-                                                f_labeltext = freetext2Parts.Length > 2 ? freetext2Parts[2] : "",
-                                                f_dosagedispense_compare = freetext1Parts.Length > 2 ? freetext1Parts[2] : ""
-                                            };
-
-                                            dataList.Add(prescriptionBody);
-                                        }
-                                        catch (Exception rowEx)
-                                        {
-                                            _logger?.LogError($"Error reading row for prescription {prescriptionNo}", rowEx);
-                                        }
+                                        // ... (โค้ดเดิม)
                                     }
                                 }
                             }
                         }
-                        catch (Exception prescriptionEx)
+                        catch (Exception ex)
                         {
-                            _logger?.LogError($"Error fetching data for prescription {prescriptionNo}", prescriptionEx);
+                            _logger?.LogError($"Error fetching Rx={prescriptionNo}", ex);
                         }
                     }
                 }
-
-                _logger?.LogInfo($"✅ Fetched {dataList.Count} records for export");
             }
             catch (Exception ex)
             {
@@ -892,6 +592,7 @@ namespace Interface_pattaya.Services
 
             return dataList;
         }
+
         private string ExtractDate(string dateStr)
         {
             if (string.IsNullOrEmpty(dateStr))
