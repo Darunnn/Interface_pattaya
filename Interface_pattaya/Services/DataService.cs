@@ -28,7 +28,7 @@ namespace Interface_pattaya.Services
             DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull // ⭐ ไม่ส่ง null
         };
 
-        public DataService(string connectionString, string apiUrl, LogManager logger = null, int batchSize = 100)
+        public DataService(string  connectionString, string apiUrl, LogManager logger = null, int batchSize = 100)
         {
             _connectionString = connectionString;
             _apiUrl = apiUrl;
