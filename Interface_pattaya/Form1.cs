@@ -297,7 +297,7 @@ namespace Interface_pattaya
             try
             {
                 _logger?.LogInfo("⏳ Loading initial data...");
-                await Task.Delay(2000);
+                await Task.Delay(500);
                 await LoadDataGridViewAsync(DateTime.Now.ToString("yyyy-MM-dd"), ""); // ส่ง "" เป็นค่าเริ่มต้น
                 _logger?.LogInfo("✅ Initial data loaded successfully");
             }
@@ -1112,6 +1112,21 @@ namespace Interface_pattaya
         }
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            if (_isServiceRunning)
+            {
+                var result = MessageBox.Show(
+                    "Service กำลังทำงานอยู่ คุณต้องการปิดโปรแกรมใช่หรือไม่?",
+                    "ยืนยันการปิด",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning
+                );
+
+                if (result == DialogResult.No)
+                {
+                    e.Cancel = true; // ยกเลิกการปิด
+                    return;
+                }
+            }
             try
             {
                 _logger?.LogInfo("=== Application Closing ===");
