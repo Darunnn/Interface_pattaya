@@ -470,7 +470,7 @@ namespace Interface_pattaya
                 return;
             }
             statusLabel.Text = $"Status: {status}";
-          
+
         }
 
 
@@ -587,7 +587,7 @@ namespace Interface_pattaya
                 try
                 {
                     loopCount++;
-                    
+
 
                     // ⭐ แสดง Status กำลังตรวจสอบ
                     this.Invoke((MethodInvoker)delegate
@@ -895,7 +895,7 @@ namespace Interface_pattaya
 
                 _logger?.LogInfo($"✅ [DEBUG] Added {addedCount}/{data.Count} rows successfully");
 
-              
+
                 UpdateSummaryCounts();
 
                 if (dataGridView.DataSource == null)
@@ -1088,7 +1088,7 @@ namespace Interface_pattaya
                     string day = dateStr.Substring(6, 2);
                     string hour = dateStr.Substring(8, 2);
                     string minute = dateStr.Substring(10, 2);
-                   
+
 
                     return $"{year}-{month}-{day} {hour}:{minute}:00";
                 }
