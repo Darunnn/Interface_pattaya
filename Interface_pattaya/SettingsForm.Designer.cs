@@ -269,7 +269,7 @@
             // 
             txtApiEndpoint.Location = new Point(33, 70);
             txtApiEndpoint.Name = "txtApiEndpoint";
-            txtApiEndpoint.Size = new Size(610, 22);
+            txtApiEndpoint.Size = new Size(587, 22);
             txtApiEndpoint.TabIndex = 1;
             // 
             // lblApiEndpoint
