@@ -136,7 +136,7 @@ namespace Interface_pattaya.Services
                     {
                         command.Parameters.AddWithValue("@CurrentDate", currentDate);
                         command.Parameters.AddWithValue("@BatchSize", _batchSize); // ⭐ Dynamic limit
-                        command.CommandTimeout = 60; // ⭐ ลดจาก 120
+                        command.CommandTimeout = 60; 
 
                         using (var reader = await command.ExecuteReaderAsync())
                         {
@@ -244,7 +244,8 @@ namespace Interface_pattaya.Services
                                         f_remark = ToNull(freetext1Parts.Length > 0 ? freetext1Parts[0] : null),
                                         f_durationtext = ToNull(freetext1Parts.Length > 1 ? freetext1Parts[1] : null),
                                         f_labeltext = ToNull(freetext2Parts.Length > 2 ? freetext2Parts[2] : null),
-                                        f_dosagedispense_compare = ToNull(freetext1Parts.Length > 2 ? freetext1Parts[2] : null)
+                                        f_dosagedispense_compare = ToNull(freetext1Parts.Length > 2 ? freetext1Parts[2] : null),
+                                        f_ipdpt_record_no= ToNull(reader["f_ipdpt_record_no"]?.ToString())
                                     };
 
                                     batchList.Add(prescriptionBody);
@@ -657,7 +658,8 @@ namespace Interface_pattaya.Services
                                                 f_remark = ToNull(freetext1Parts.Length > 0 ? freetext1Parts[0] : null),
                                                 f_durationtext = ToNull(freetext1Parts.Length > 1 ? freetext1Parts[1] : null),
                                                 f_labeltext = ToNull(freetext2Parts.Length > 2 ? freetext2Parts[2] : null),
-                                                f_dosagedispense_compare = ToNull(freetext1Parts.Length > 2 ? freetext1Parts[2] : null)
+                                                f_dosagedispense_compare = ToNull(freetext1Parts.Length > 2 ? freetext1Parts[2] : null),
+                                                f_ipdpt_record_no = ToNull(reader["f_ipdpt_record_no"]?.ToString())
                                             };
 
                                             dataList.Add(prescriptionBody);

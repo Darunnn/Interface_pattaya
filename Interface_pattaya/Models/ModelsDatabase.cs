@@ -80,6 +80,7 @@ namespace Interface_pattaya.Models
         public string f_labeltext { get; set; }
         public string f_durationtext { get; set; }
         public string f_dosagedispense_compare { get; set; }
+        public string f_ipdpt_record_no { get; set; }
     }
 
     public class PrescriptionBodyResponse

@@ -353,7 +353,7 @@ namespace Interface_pattaya
             content.AppendLine("# ===== PROCESSING SETTINGS =====");
             content.AppendLine("# ระยะเวลาในการตรวจสอบข้อมูลใหม่ (วินาที)");
             content.AppendLine("# ค่าที่แนะนำ: 15-60 วินาที");
-            content.AppendLine("ProcessingIntervalSeconds=30");
+            content.AppendLine("ProcessingIntervalSeconds=1");
             content.AppendLine("# จำนวนสูงสุดของ records ที่ประมวลผลในแต่ละรอบ");
             content.AppendLine("MaxProcessingBatchSize=50");
             content.AppendLine("# เริ่มการประมวลผลอัตโนมัติเมื่อเปิดโปรแกรม (true/false)");
