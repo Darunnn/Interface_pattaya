@@ -28,7 +28,6 @@ namespace Interface_pattaya
         private System.Windows.Forms.Timer _autoMessageBoxTimer;
         private DateTime _lastConnectedTime = DateTime.MinValue;
         private bool _wasServiceRunningBeforeDisconnect = false;
-        // ⭐ DataTable & DataView for better filtering/sorting
         private DataTable _processedDataTable;
         private DataView _filteredDataView;
         private string _currentStatusFilter = "All";
@@ -71,9 +70,7 @@ namespace Interface_pattaya
                     _logger.LogInfo(_appConfig.GetConfigurationSummary());
                 }
 
-                // ⭐ Initialize DataTable
                 InitializeDataTable();
-
                 UpdateUIState();
 
                 _connectionCheckTimer = new System.Windows.Forms.Timer();
@@ -84,7 +81,6 @@ namespace Interface_pattaya
                 _logger.LogInfo("Connection check timer started");
 
                 Task.Delay(500).ContinueWith(_ => CheckDatabaseConnection());
-
                 _ = LoadInitialDataAsync();
 
                 _logger.LogInfo("Application initialized successfully");
@@ -96,7 +92,6 @@ namespace Interface_pattaya
             }
         }
 
-        // ⭐ Initialize DataTable with columns
         private void InitializeDataTable()
         {
             try
@@ -114,20 +109,16 @@ namespace Interface_pattaya
                 {
                     dataGridView.DataSource = _filteredDataView;
 
-                    // Set column widths
                     dataGridView.Columns["Transaction DateTime"].Width = 165;
                     dataGridView.Columns["Order No"].Width = 120;
                     dataGridView.Columns["HN"].Width = 90;
                     dataGridView.Columns["Patient Name"].Width = 180;
                     dataGridView.Columns["Status"].Width = 100;
 
-                    // Setup cell formatting event
                     dataGridView.CellFormatting += DataGridView_CellFormatting;
                 }
 
-                // ⭐ Initialize Panel Click Filters
                 InitializePanelFilters();
-
                 _logger?.LogInfo("DataTable initialized successfully");
             }
             catch (Exception ex)
@@ -136,7 +127,6 @@ namespace Interface_pattaya
             }
         }
 
-        // ⭐ Initialize Panel Click Events for Filtering
         private void InitializePanelFilters()
         {
             try
@@ -182,7 +172,6 @@ namespace Interface_pattaya
             }
         }
 
-        // ⭐ Panel Click Handlers for Status Filtering
         private void TotalPanel_Click(object sender, EventArgs e)
         {
             _currentStatusFilter = "All";
@@ -201,7 +190,6 @@ namespace Interface_pattaya
             ApplyStatusFilter();
         }
 
-        // ⭐ Apply Status Filter using DataView
         private void ApplyStatusFilter()
         {
             try
@@ -228,7 +216,6 @@ namespace Interface_pattaya
             }
         }
 
-        // ⭐ Update Panel Border Style to show selected filter
         private void UpdateStatusFilterUI()
         {
             try
@@ -255,7 +242,6 @@ namespace Interface_pattaya
             }
         }
 
-        // ⭐ DataGridView Cell Formatting for Colors
         private void DataGridView_CellFormatting(object sender, DataGridViewCellFormattingEventArgs e)
         {
             try
@@ -298,7 +284,7 @@ namespace Interface_pattaya
             {
                 _logger?.LogInfo("⏳ Loading initial data...");
                 await Task.Delay(500);
-                await LoadDataGridViewAsync(DateTime.Now.ToString("yyyy-MM-dd"), ""); // ส่ง "" เป็นค่าเริ่มต้น
+                await LoadDataGridViewAsync(DateTime.Now.ToString("yyyy-MM-dd"), "");
                 _logger?.LogInfo("✅ Initial data loaded successfully");
             }
             catch (Exception ex)
@@ -326,7 +312,6 @@ namespace Interface_pattaya
                 {
                     connection.Open();
 
-                    // ✅ เปลี่ยนสถานะจาก Disconnected → Connected
                     if (!_isDatabaseConnected)
                     {
                         _isDatabaseConnected = true;
@@ -337,7 +322,7 @@ namespace Interface_pattaya
                         {
                             this.Invoke((MethodInvoker)delegate
                             {
-                                UpdateDatabaseConnectedUI(); // จะอัพเดทเวลาที่นี่
+                                UpdateDatabaseConnectedUI();
                             });
                         }
                         else
@@ -345,7 +330,6 @@ namespace Interface_pattaya
                             UpdateDatabaseConnectedUI();
                         }
                     }
-                    // ⚠️ ถ้ายังคง Connected อยู่ ไม่ต้องทำอะไร (ไม่อัพเดทเวลา)
 
                     connection.Close();
                 }
@@ -356,10 +340,7 @@ namespace Interface_pattaya
                     if (_isDatabaseConnected)
                     {
                         _isDatabaseConnected = false;
-
-                        // คำนวณเวลา disconnect
                         DateTime disconnectTime = DateTime.Now;
-
                         _logger.LogConnectDatabase(false, _lastConnectedTime, disconnectTime);
 
                         if (this.InvokeRequired)
@@ -395,7 +376,6 @@ namespace Interface_pattaya
             }
         }
 
-
         private void UpdateDatabaseConnectedUI()
         {
             try
@@ -407,7 +387,6 @@ namespace Interface_pattaya
                 startStopButton.Enabled = true;
                 startStopButton.BackColor = System.Drawing.Color.FromArgb(52, 152, 219);
 
-                // อัพเดท Status
                 if (!_isServiceRunning)
                 {
                     UpdateStatus("⏹ Stopped - Ready to start");
@@ -452,7 +431,6 @@ namespace Interface_pattaya
                 startStopButton.Enabled = false;
                 startStopButton.BackColor = System.Drawing.Color.Gray;
 
-                // อัพเดท Status
                 UpdateStatus("🔴 Database Disconnected - Service stopped");
 
                 _logger?.LogInfo($"UI updated - database disconnected at {disconnectTime:yyyy-MM-dd HH:mm:ss}");
@@ -462,6 +440,7 @@ namespace Interface_pattaya
                 _logger?.LogError("Error updating disconnected UI", ex);
             }
         }
+
         private void UpdateStatus(string status)
         {
             if (statusLabel.InvokeRequired)
@@ -470,9 +449,7 @@ namespace Interface_pattaya
                 return;
             }
             statusLabel.Text = $"Status: {status}";
-
         }
-
 
         private void UpdateUIState()
         {
@@ -579,17 +556,17 @@ namespace Interface_pattaya
             }
         }
 
+        // ⭐⭐⭐ ปรับปรุง ProcessDataLoop ให้ real-time
         private async Task ProcessDataLoop(CancellationToken cancellationToken)
         {
             int loopCount = 0;
+
             while (!cancellationToken.IsCancellationRequested && _isServiceRunning)
             {
                 try
                 {
                     loopCount++;
 
-
-                    // ⭐ แสดง Status กำลังตรวจสอบ
                     this.Invoke((MethodInvoker)delegate
                     {
                         UpdateStatus($"▶ Running - Checking for new data... (Loop #{loopCount})");
@@ -603,7 +580,6 @@ namespace Interface_pattaya
                     {
                         lastCheckLabel.Text = $"Last Check: {DateTime.Now:HH:mm:ss}";
 
-                        // ⭐ แสดง Status ตามผลลัพธ์
                         if (totalFound > 0)
                         {
                             UpdateStatus($"▶ Running - Processed {totalFound} items ({successCount} success, {failedCount} failed)");
@@ -614,14 +590,14 @@ namespace Interface_pattaya
                             }
 
                             lastFoundLabel.Text = $"Last Found: {totalFound} items";
+
+                            // ⭐ โหลดข้อมูลใหม่ทันที
+                            Task.Run(() => LoadDataGridViewAsync(DateTime.Now.ToString("yyyy-MM-dd")));
                         }
                         else
                         {
                             UpdateStatus($"▶ Running - No new data found");
                         }
-
-                        // โหลดข้อมูลใหม่
-                        Task.Run(() => LoadDataGridViewAsync(DateTime.Now.ToString("yyyy-MM-dd")));
                     });
 
                     foreach (var error in errors)
@@ -631,8 +607,10 @@ namespace Interface_pattaya
 
                     _logger.LogInfo($"Loop #{loopCount} Complete: {successCount} success, {failedCount} failed");
 
-                    // ⭐ แสดง Status รอรอบถัดไป
-                    int delaySeconds = _appConfig?.ProcessingIntervalSeconds ?? 5;
+                    // ⭐ ลดเวลารอจาก 5 นาทีเป็น 10-15 วินาที
+                    int delaySeconds = _appConfig?.ProcessingIntervalSeconds ?? 15;
+
+                    _logger.LogInfo($"⏳ Waiting {delaySeconds}s before next check...");
 
                     for (int i = delaySeconds; i > 0; i--)
                     {
@@ -657,10 +635,10 @@ namespace Interface_pattaya
 
                     this.Invoke((MethodInvoker)delegate
                     {
-                        UpdateStatus($"⚠️ Error - Retrying in 5s...");
+                        UpdateStatus($"⚠️ Error - Retrying in 10s...");
                     });
 
-                    await Task.Delay(5000, cancellationToken);
+                    await Task.Delay(10000, cancellationToken);
                 }
             }
 
@@ -697,16 +675,12 @@ namespace Interface_pattaya
             {
                 _logger?.LogInfo("Refresh button clicked");
 
-                // ⭐ รีเซ็ตทุกอย่างกลับไปเป็นค่าเริ่มต้น
                 _currentStatusFilter = "All";
                 searchTextBox.Clear();
-
-                // ⭐ รีเซ็ต DateTimePicker กลับไปเป็นวันที่ปัจจุบัน
                 dateTimePicker.Value = DateTime.Now;
 
                 UpdateStatus("🔄 Refreshing data...");
 
-                // โหลดข้อมูลวันนี้
                 await LoadDataGridViewAsync(DateTime.Now.ToString("yyyy-MM-dd"), "");
 
                 UpdateStatus("✅ Data refreshed");
@@ -727,7 +701,6 @@ namespace Interface_pattaya
             {
                 _logger?.LogInfo("Settings button clicked");
 
-                // เปิด Settings Form
                 using (var settingsForm = new SettingsForm())
                 {
                     var result = settingsForm.ShowDialog(this);
@@ -736,7 +709,6 @@ namespace Interface_pattaya
                     {
                         _logger?.LogInfo("Settings were changed, reloading configuration...");
 
-                        // โหลดการตั้งค่าใหม่
                         _appConfig = new AppConfig();
                         if (_appConfig.LoadConfiguration())
                         {
@@ -749,7 +721,6 @@ namespace Interface_pattaya
                                 3000
                             );
 
-                            // ตรวจสอบการเชื่อมต่อฐานข้อมูลใหม่
                             CheckDatabaseConnection();
                         }
                         else
@@ -769,7 +740,7 @@ namespace Interface_pattaya
                 ShowAutoClosingMessageBox($"ข้อผิดพลาด: {ex.Message}", "ข้อผิดพลาด");
             }
         }
-        // ⭐ Load Data and Add to DataTable
+
         private async Task LoadDataGridViewAsync(string date = "", string searchText = "")
         {
             try
@@ -786,12 +757,11 @@ namespace Interface_pattaya
                     return;
                 }
 
-                // ⭐ อัพเดท Status ว่ากำลังโหลด
                 if (this.InvokeRequired)
                 {
                     this.Invoke((MethodInvoker)delegate
                     {
-                        if (!_isServiceRunning) // ถ้าไม่ได้ running ให้แสดง loading
+                        if (!_isServiceRunning)
                         {
                             UpdateStatus("⏳ Loading data...");
                         }
@@ -805,19 +775,16 @@ namespace Interface_pattaya
                     }
                 }
 
-                // ⭐ ดึงข้อมูลจากฐานข้อมูล
                 var data = await _dataService.GetPrescriptionDataAsync(queryDate, searchText);
 
                 _logger?.LogInfo($"📊 [DEBUG] Retrieved {data.Count} records from database");
 
-                // ⭐ ต้อง Invoke เสมอเมื่ออัพเดท UI
                 if (this.InvokeRequired)
                 {
                     this.Invoke((MethodInvoker)delegate
                     {
                         UpdateGridView(data);
 
-                        // ⭐ อัพเดท Status หลังโหลดเสร็จ
                         if (!_isServiceRunning)
                         {
                             UpdateStatus($"✅ Loaded {data.Count} records");
@@ -895,7 +862,6 @@ namespace Interface_pattaya
 
                 _logger?.LogInfo($"✅ [DEBUG] Added {addedCount}/{data.Count} rows successfully");
 
-
                 UpdateSummaryCounts();
 
                 if (dataGridView.DataSource == null)
@@ -908,7 +874,6 @@ namespace Interface_pattaya
                     dataGridView.Refresh();
                 }
 
-                // ⭐ อัพเดท Status ให้กลับไปเป็นสถานะปกติ
                 if (_isServiceRunning)
                 {
                     UpdateStatus($"▶ Running - Grid updated with {addedCount} records");
@@ -926,7 +891,7 @@ namespace Interface_pattaya
                 UpdateStatus("❌ Error updating grid");
             }
         }
-        // ⭐ Update Summary Counts from DataTable
+
         private void UpdateSummaryCounts()
         {
             try
@@ -1015,7 +980,6 @@ namespace Interface_pattaya
                 string queryDate = date.Replace("-", "");
                 _logger?.LogInfo($"🔍 [DEBUG CHECK] Checking database for date: {queryDate}");
 
-                // ตรวจสอบว่ามีข้อมูลวันนี้ไหม (ไม่สนใจ status)
                 string debugQuery = @"
             SELECT COUNT(*) as total_count
             FROM tb_thaneshosp_middle
@@ -1031,7 +995,6 @@ namespace Interface_pattaya
                         _logger?.LogInfo($"📊 [DEBUG] Total records for date {queryDate}: {totalCount}");
                     }
 
-                    // ตรวจสอบว่ามีข้อมูลที่ status = 1 หรือ 3 ไหม
                     string statusQuery = @"
                 SELECT 
                     COUNT(*) as count,
@@ -1061,6 +1024,7 @@ namespace Interface_pattaya
                 _logger?.LogError("❌ Error in debug query", ex);
             }
         }
+
         private string FormatPrescriptionDate(string dateStr)
         {
             try
@@ -1068,7 +1032,6 @@ namespace Interface_pattaya
                 if (string.IsNullOrEmpty(dateStr))
                     return "";
 
-                // ถ้ามีความยาว >= 14 ตัวอักษร (yyyyMMddHHmmss)
                 if (dateStr.Length >= 14)
                 {
                     string year = dateStr.Substring(0, 4);
@@ -1080,7 +1043,6 @@ namespace Interface_pattaya
 
                     return $"{year}-{month}-{day} {hour}:{minute}:{second}";
                 }
-                // ถ้ามีความยาว >= 12 ตัวอักษร (yyyyMMddHHmm)
                 else if (dateStr.Length >= 12)
                 {
                     string year = dateStr.Substring(0, 4);
@@ -1089,10 +1051,8 @@ namespace Interface_pattaya
                     string hour = dateStr.Substring(8, 2);
                     string minute = dateStr.Substring(10, 2);
 
-
                     return $"{year}-{month}-{day} {hour}:{minute}:00";
                 }
-                // ถ้ามีความยาว >= 8 ตัวอักษร (yyyyMMdd)
                 else if (dateStr.Length >= 8)
                 {
                     string year = dateStr.Substring(0, 4);
@@ -1102,7 +1062,7 @@ namespace Interface_pattaya
                     return $"{year}-{month}-{day} 00:00:00";
                 }
 
-                return dateStr; // คืนค่าเดิมถ้าไม่ตรงรูปแบบ
+                return dateStr;
             }
             catch (Exception ex)
             {
@@ -1110,6 +1070,7 @@ namespace Interface_pattaya
                 return dateStr;
             }
         }
+
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             if (_isServiceRunning)
@@ -1123,7 +1084,7 @@ namespace Interface_pattaya
 
                 if (result == DialogResult.No)
                 {
-                    e.Cancel = true; // ยกเลิกการปิด
+                    e.Cancel = true;
                     return;
                 }
             }
@@ -1154,28 +1115,24 @@ namespace Interface_pattaya
             base.OnFormClosing(e);
         }
 
-        // ✅ แก้ไข ExportButton_Click - ใช้ async เพื่อดึงข้อมูลจาก database
         private async void ExportButton_Click(object sender, EventArgs e)
         {
             try
             {
                 _logger?.LogInfo("Export button clicked");
 
-                // ตรวจสอบว่ามีข้อมูลใน DataGridView หรือไม่
                 if (dataGridView.Rows.Count == 0)
                 {
                     ShowAutoClosingMessageBox("ไม่มีข้อมูลให้ Export", "แจ้งเตือน");
                     return;
                 }
 
-                // ตรวจสอบว่ามีการเลือกแถวหรือไม่
                 if (dataGridView.SelectedRows.Count == 0)
                 {
                     ShowAutoClosingMessageBox("กรุณาเลือกข้อมูลที่ต้องการ Export ก่อน", "แจ้งเตือน");
                     return;
                 }
 
-                // ✅ เรียก async method
                 await ExportSelectedRowsAsync();
             }
             catch (Exception ex)
@@ -1185,7 +1142,6 @@ namespace Interface_pattaya
             }
         }
 
-        // ✅ Export เป็น JSON Format แบบแนวตั้ง (Pretty Print)
         private async Task ExportSelectedRowsAsync()
         {
             try
@@ -1198,7 +1154,6 @@ namespace Interface_pattaya
 
                 _logger?.LogInfo($"Exporting {dataGridView.SelectedRows.Count} selected rows");
 
-                // ⭐ Step 1: รวบรวม PrescriptionNo และ Date จากแถวที่เลือก
                 var prescriptionList = new List<(string prescriptionNo, string prescriptionDate)>();
 
                 foreach (DataGridViewRow row in dataGridView.SelectedRows)
@@ -1208,7 +1163,6 @@ namespace Interface_pattaya
                         string prescriptionNo = row.Cells["Order No"]?.Value?.ToString() ?? "";
                         string transactionDateTime = row.Cells["Transaction DateTime"]?.Value?.ToString() ?? "";
 
-                        // แปลง "2024-12-11 14:30:00" → "20241211"
                         string prescriptionDate = "";
                         if (!string.IsNullOrEmpty(transactionDateTime) && transactionDateTime.Length >= 10)
                         {
@@ -1235,7 +1189,6 @@ namespace Interface_pattaya
 
                 _logger?.LogInfo($"📦 Fetching full data for {prescriptionList.Count} prescriptions from database...");
 
-                // ⭐ Step 2: ดึงข้อมูลเต็มจาก Database
                 UpdateStatus($"⏳ Loading full data for export ({prescriptionList.Count} prescriptions)...");
 
                 var fullDataList = await _dataService.GetFullPrescriptionDataAsync(prescriptionList);
@@ -1249,7 +1202,6 @@ namespace Interface_pattaya
 
                 _logger?.LogInfo($"✅ Retrieved {fullDataList.Count} records from database");
 
-                // ⭐ Step 3: เปิด SaveFileDialog (JSON เท่านั้น)
                 using (var saveFileDialog = new SaveFileDialog())
                 {
                     saveFileDialog.Filter = "JSON Files (*.json)|*.json";
@@ -1262,22 +1214,19 @@ namespace Interface_pattaya
 
                         UpdateStatus($"💾 Exporting to {Path.GetFileName(filePath)}...");
 
-                        // ⭐ Step 4: สร้าง JSON Body เหมือนกับที่ส่งไป API
                         var body = new PrescriptionBodyResponse
                         {
                             data = fullDataList.ToArray()
                         };
 
-                        // ⭐ ใช้ JsonSerializer พร้อม WriteIndented = true (แนวตั้ง)
                         var json = JsonSerializer.Serialize(body, new JsonSerializerOptions
                         {
-                            PropertyNamingPolicy = null, // ใช้ชื่อ property ตามที่กำหนด
-                            WriteIndented = true, // ⭐ เปิด Pretty Print (แนวตั้ง)
-                            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping, // ไม่เข้ารหัสภาษาไทย
-                            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.Never // แสดงทุก field แม้เป็น null
+                            PropertyNamingPolicy = null,
+                            WriteIndented = true,
+                            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+                            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.Never
                         });
 
-                        // ⭐ Step 5: บันทึกไฟล์
                         await Task.Run(() => File.WriteAllText(filePath, json, Encoding.UTF8));
 
                         _logger?.LogInfo($"✅ Export completed: {filePath}");
@@ -1309,6 +1258,5 @@ namespace Interface_pattaya
                 ShowAutoClosingMessageBox($"ข้อผิดพลาดในการ Export: {ex.Message}", "ข้อผิดพลาด");
             }
         }
-
     }
 }

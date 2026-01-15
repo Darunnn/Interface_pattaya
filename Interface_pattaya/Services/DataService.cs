@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using System.Linq;
+using System.Data;
 using Interface_pattaya.Models;
 using Interface_pattaya.utils;
 
@@ -19,34 +20,128 @@ namespace Interface_pattaya.Services
         private readonly LogManager _logger;
         private readonly int _batchSize;
 
-        // ⭐ เพิ่ม: JsonSerializerOptions แบบ cached
         private static readonly JsonSerializerOptions _jsonOptions = new JsonSerializerOptions
         {
             PropertyNamingPolicy = null,
-            WriteIndented = false, // ⭐ ปิด indent เพื่อลดขนาด
+            WriteIndented = false,
             Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull // ⭐ ไม่ส่ง null
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
         };
 
-        public DataService(string  connectionString, string apiUrl, LogManager logger = null, int batchSize = 100)
+        public DataService(string connectionString, string apiUrl, LogManager logger = null, int batchSize = 100)
         {
             _connectionString = connectionString;
             _apiUrl = apiUrl;
-
-            // ⭐ ปรับ HttpClient settings
-            _httpClient = new HttpClient
-            {
-                Timeout = TimeSpan.FromSeconds(30) // ⭐ ลดจาก 60 เป็น 30
-            };
-            _httpClient.DefaultRequestHeaders.ConnectionClose = false; // ⭐ ใช้ Keep-Alive
-
+            _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+            _httpClient.DefaultRequestHeaders.ConnectionClose = false;
             _logger = logger ?? new LogManager();
-            _batchSize = batchSize; // ⭐ เพิ่มเป็น 100 (ค่า default)
+            _batchSize = batchSize;
         }
 
         private string ToNull(string value)
         {
             return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        }
+
+        // ⭐ Helper method สำหรับสร้าง object
+        private PrescriptionBodyRequest BuildPrescriptionBody(IDataReader reader)
+        {
+            try
+            {
+                var seq = reader["f_seq"]?.ToString();
+                var prescriptionDate = reader["f_prescriptiondate"]?.ToString();
+                var prescriptionDateFormatted = ExtractDate(prescriptionDate);
+                var freetext1 = reader["f_freetext1"]?.ToString();
+                var freetext2 = reader["f_freetext2"]?.ToString();
+                var freetext1Parts = freetext1?.Split('^') ?? Array.Empty<string>();
+                var freetext2Parts = freetext2?.Split('^') ?? Array.Empty<string>();
+                var sex = ProcessSex(reader["f_sex"]?.ToString());
+                var prnValue = reader["f_PRN"]?.ToString();
+                var prn = ProcessPRN(prnValue, 1);
+                var stat = ProcessPRN(prnValue, 2);
+
+                return new PrescriptionBodyRequest
+                {
+                    UniqID = ToNull(reader["f_referenceCode"]?.ToString()),
+                    f_prescriptionno = ToNull(reader["f_prescriptionnohis"]?.ToString()),
+                    f_seq = decimal.TryParse(seq, out decimal seqVal) ? seqVal : (decimal?)null,
+                    f_seqmax = decimal.TryParse(reader["f_seqmax"]?.ToString(), out decimal seqmax) ? seqmax : (decimal?)null,
+                    f_prescriptiondate = ToNull(prescriptionDateFormatted),
+                    f_ordercreatedate = ToNull($"{reader["f_ordercreatedate"]} {reader["f_ordercreatetime"]}"),
+                    f_ordertargetdate = ToNull(reader["f_ordertargetdate"]?.ToString()),
+                    f_ordertargettime = ToNull(reader["f_ordertargettime"]?.ToString()),
+                    f_doctorcode = ToNull(reader["f_doctorcode"]?.ToString()),
+                    f_doctorname = ToNull(reader["f_doctorname"]?.ToString()),
+                    f_useracceptby = ToNull(reader["f_useracceptby"]?.ToString()),
+                    f_orderacceptdate = ToNull($"{reader["f_orderacceptdate"]} {reader["f_orderaccepttime"]}"),
+                    f_orderacceptfromip = ToNull(reader["f_orderacceptfromip"]?.ToString()),
+                    f_pharmacylocationcode = ToNull(reader["f_pharmacylocationpackcode"]?.ToString()),
+                    f_pharmacylocationdesc = ToNull(reader["f_pharmacylocationpackdesc"]?.ToString()),
+                    f_prioritycode = ToNull(reader["f_prioritycode"]?.ToString()),
+                    f_prioritydesc = ToNull(reader["f_prioritydesc"]?.ToString()),
+                    f_hn = ToNull(reader["f_hn"]?.ToString()),
+                    f_an = ToNull(reader["f_en"]?.ToString()),
+                    f_vn = null,
+                    f_title = null,
+                    f_patientname = ToNull(reader["f_patientname"]?.ToString()),
+                    f_sex = ToNull(sex),
+                    f_patientdob = ToNull(reader["f_patientdob"]?.ToString()),
+                    f_wardcode = ToNull(reader["f_wardcode"]?.ToString()),
+                    f_warddesc = ToNull(reader["f_warddesc"]?.ToString()),
+                    f_roomcode = ToNull(reader["f_roomcode"]?.ToString()),
+                    f_roomdesc = ToNull(reader["f_roomdesc"]?.ToString()),
+                    f_bedcode = ToNull(reader["f_bedcode"]?.ToString()),
+                    f_beddesc = ToNull(reader["f_bedcode"]?.ToString()),
+                    f_right = null,
+                    f_drugallergy = ToNull(reader["f_freetext4"]?.ToString()),
+                    f_diagnosis = null,
+                    f_orderitemcode = ToNull(freetext2Parts.Length > 0 ? freetext2Parts[0] : null),
+                    f_orderitemname = ToNull(reader["f_orderitemname"]?.ToString()),
+                    f_orderitemnameTH = ToNull(reader["f_orderitemnameTH"]?.ToString()),
+                    f_orderitemnamegeneric = ToNull(reader["f_orderitemgenericname"]?.ToString()),
+                    f_orderqty = decimal.TryParse(reader["f_orderqty"]?.ToString(), out decimal qty) ? qty : (decimal?)null,
+                    f_orderunitcode = ToNull(reader["f_orderunitcode"]?.ToString()),
+                    f_orderunitdesc = ToNull(reader["f_orderunitdesc"]?.ToString()),
+                    f_dosage = decimal.TryParse(reader["f_dosage"]?.ToString(), out decimal dosage) ? dosage : (decimal?)null,
+                    f_dosageunit = ToNull(reader["f_dosageunit"]?.ToString()),
+                    f_dosagetext = null,
+                    f_drugformcode = null,
+                    f_drugformdesc = null,
+                    f_HAD = ToNull(reader["f_heighAlertDrug"]?.ToString()) ?? "0",
+                    f_narcoticFlg = ToNull(reader["f_narcoticdrug"]?.ToString()) ?? "0",
+                    f_psychotropic = ToNull(reader["f_psychotropicDrug"]?.ToString()) ?? "0",
+                    f_binlocation = ToNull(freetext2Parts.Length > 1 ? freetext2Parts[1] : null),
+                    f_itemidentify = null,
+                    f_itemlotno = ToNull(reader["f_itemlotcode"]?.ToString()),
+                    f_itemlotexpire = ToNull(reader["f_itemlotexpire"]?.ToString()),
+                    f_instructioncode = ToNull(reader["f_instructioncode"]?.ToString()),
+                    f_instructiondesc = ToNull(reader["f_instructiondesc"]?.ToString()),
+                    f_frequencycode = ToNull(reader["f_frequencycode"]?.ToString()),
+                    f_frequencydesc = ToNull(reader["f_frequencydesc"]?.ToString()),
+                    f_timecode = null,
+                    f_timedesc = null,
+                    f_frequencytime = ToNull(reader["f_frequencyTime"]?.ToString()),
+                    f_dosagedispense = ToNull(reader["f_dosagedispense"]?.ToString()),
+                    f_dayofweek = null,
+                    f_noteprocessing = ToNull(reader["f_noteprocessing"]?.ToString()),
+                    f_prn = ToNull(prn),
+                    f_stat = ToNull(stat),
+                    f_comment = ToNull(reader["f_comment"]?.ToString()),
+                    f_tomachineno = decimal.TryParse(reader["f_tomachineno"]?.ToString(), out decimal machine) ? machine : (decimal?)null,
+                    f_ipd_order_recordno = ToNull(reader["f_ipdpt_record_no"]?.ToString()),
+                    f_status = ToNull(reader["f_status"]?.ToString()),
+                    f_remark = ToNull(freetext1Parts.Length > 0 ? freetext1Parts[0] : null),
+                    f_durationtext = ToNull(freetext1Parts.Length > 1 ? freetext1Parts[1] : null),
+                    f_labeltext = ToNull(freetext2Parts.Length > 2 ? freetext2Parts[2] : null),
+                    f_dosagedispense_compare = ToNull(freetext1Parts.Length > 2 ? freetext1Parts[2] : null),
+                    f_ipdpt_record_no = ToNull(reader["f_ipdpt_record_no"]?.ToString())
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError("Error building prescription body", ex);
+                throw;
+            }
         }
 
         public async Task<(int success, int failed, List<string> errors)> ProcessAndSendDataAsync()
@@ -56,7 +151,6 @@ namespace Interface_pattaya.Services
             var errors = new List<string>();
             var currentDate = DateTime.Now.ToString("yyyyMMdd");
 
-            // ⭐ เพิ่ม LIMIT ให้ตรงกับ batch size
             string query = $@"
                 SELECT 
                     f_referenceCode,
@@ -128,15 +222,22 @@ namespace Interface_pattaya.Services
 
             try
             {
-                using (var connection = new MySqlConnection(_connectionString))
+                // ⭐ สร้าง connection builder เพื่อตั้ง timeout
+                var connectionBuilder = new MySqlConnectionStringBuilder(_connectionString)
+                {
+                    ConnectionTimeout = 10
+                };
+
+                using (var connection = new MySqlConnection(connectionBuilder.ConnectionString))
                 {
                     await connection.OpenAsync();
 
                     using (var command = new MySqlCommand(query, connection))
                     {
                         command.Parameters.AddWithValue("@CurrentDate", currentDate);
-                        command.Parameters.AddWithValue("@BatchSize", _batchSize); // ⭐ Dynamic limit
-                        command.CommandTimeout = 60; 
+                        command.Parameters.AddWithValue("@BatchSize", _batchSize);
+                        command.CommandTimeout = 30;
+                        command.CommandType = System.Data.CommandType.Text;
 
                         using (var reader = await command.ExecuteReaderAsync())
                         {
@@ -151,9 +252,7 @@ namespace Interface_pattaya.Services
                                 try
                                 {
                                     prescriptionNo = reader["f_prescriptionnohis"]?.ToString();
-                                    var seq = reader["f_seq"]?.ToString();
                                     var prescriptionDate = reader["f_prescriptiondate"]?.ToString();
-
                                     prescriptionDateFormatted = ExtractDate(prescriptionDate);
 
                                     if (string.IsNullOrEmpty(prescriptionNo))
@@ -162,94 +261,22 @@ namespace Interface_pattaya.Services
                                         continue;
                                     }
 
-                                    var freetext1 = reader["f_freetext1"]?.ToString();
-                                    var freetext2 = reader["f_freetext2"]?.ToString();
-                                    var freetext1Parts = freetext1?.Split('^') ?? Array.Empty<string>();
-                                    var freetext2Parts = freetext2?.Split('^') ?? Array.Empty<string>();
-                                    var sex = ProcessSex(reader["f_sex"]?.ToString());
-                                    var prnValue = reader["f_PRN"]?.ToString();
-                                    var prn = ProcessPRN(prnValue, 1);
-                                    var stat = ProcessPRN(prnValue, 2);
-
-                                    var prescriptionBody = new PrescriptionBodyRequest
-                                    {
-                                        UniqID = ToNull(reader["f_referenceCode"]?.ToString()),
-                                        f_prescriptionno = ToNull(prescriptionNo),
-                                        f_seq = decimal.TryParse(seq, out decimal seqVal) ? seqVal : (decimal?)null,
-                                        f_seqmax = decimal.TryParse(reader["f_seqmax"]?.ToString(), out decimal seqmax) ? seqmax : (decimal?)null,
-                                        f_prescriptiondate = ToNull(prescriptionDateFormatted),
-                                        f_ordercreatedate = ToNull($"{reader["f_ordercreatedate"]} {reader["f_ordercreatetime"]}"),
-                                        f_ordertargetdate = ToNull(reader["f_ordertargetdate"]?.ToString()),
-                                        f_ordertargettime = ToNull(reader["f_ordertargettime"]?.ToString()),
-                                        f_doctorcode = ToNull(reader["f_doctorcode"]?.ToString()),
-                                        f_doctorname = ToNull(reader["f_doctorname"]?.ToString()),
-                                        f_useracceptby = ToNull(reader["f_useracceptby"]?.ToString()),
-                                        f_orderacceptdate = ToNull($"{reader["f_orderacceptdate"]} {reader["f_orderaccepttime"]}"),
-                                        f_orderacceptfromip = ToNull(reader["f_orderacceptfromip"]?.ToString()),
-                                        f_pharmacylocationcode = ToNull(reader["f_pharmacylocationpackcode"]?.ToString()),
-                                        f_pharmacylocationdesc = ToNull(reader["f_pharmacylocationpackdesc"]?.ToString()),
-                                        f_prioritycode = ToNull(reader["f_prioritycode"]?.ToString()),
-                                        f_prioritydesc = ToNull(reader["f_prioritydesc"]?.ToString()),
-                                        f_hn = ToNull(reader["f_hn"]?.ToString()),
-                                        f_an = ToNull(reader["f_en"]?.ToString()),
-                                        f_vn = null,
-                                        f_title = null,
-                                        f_patientname = ToNull(reader["f_patientname"]?.ToString()),
-                                        f_sex = ToNull(sex),
-                                        f_patientdob = ToNull(reader["f_patientdob"]?.ToString()),
-                                        f_wardcode = ToNull(reader["f_wardcode"]?.ToString()),
-                                        f_warddesc = ToNull(reader["f_warddesc"]?.ToString()),
-                                        f_roomcode = ToNull(reader["f_roomcode"]?.ToString()),
-                                        f_roomdesc = ToNull(reader["f_roomdesc"]?.ToString()),
-                                        f_bedcode = ToNull(reader["f_bedcode"]?.ToString()),
-                                        f_beddesc = ToNull(reader["f_bedcode"]?.ToString()),
-                                        f_right = null,
-                                        f_drugallergy = ToNull(reader["f_freetext4"]?.ToString()),
-                                        f_diagnosis = null,
-                                        f_orderitemcode = ToNull(freetext2Parts.Length > 0 ? freetext2Parts[0] : null),
-                                        f_orderitemname = ToNull(reader["f_orderitemname"]?.ToString()),
-                                        f_orderitemnameTH = ToNull(reader["f_orderitemnameTH"]?.ToString()),
-                                        f_orderitemnamegeneric = ToNull(reader["f_orderitemgenericname"]?.ToString()),
-                                        f_orderqty = decimal.TryParse(reader["f_orderqty"]?.ToString(), out decimal qty) ? qty : (decimal?)null,
-                                        f_orderunitcode = ToNull(reader["f_orderunitcode"]?.ToString()),
-                                        f_orderunitdesc = ToNull(reader["f_orderunitdesc"]?.ToString()),
-                                        f_dosage = decimal.TryParse(reader["f_dosage"]?.ToString(), out decimal dosage) ? dosage : (decimal?)null,
-                                        f_dosageunit = ToNull(reader["f_dosageunit"]?.ToString()),
-                                        f_dosagetext = null,
-                                        f_drugformcode = null,
-                                        f_drugformdesc = null,
-                                        f_HAD = ToNull(reader["f_heighAlertDrug"]?.ToString()) ?? "0",
-                                        f_narcoticFlg = ToNull(reader["f_narcoticdrug"]?.ToString()) ?? "0",
-                                        f_psychotropic = ToNull(reader["f_psychotropicDrug"]?.ToString()) ?? "0",
-                                        f_binlocation = ToNull(freetext2Parts.Length > 1 ? freetext2Parts[1] : null),
-                                        f_itemidentify = null,
-                                        f_itemlotno = ToNull(reader["f_itemlotcode"]?.ToString()),
-                                        f_itemlotexpire = ToNull(reader["f_itemlotexpire"]?.ToString()),
-                                        f_instructioncode = ToNull(reader["f_instructioncode"]?.ToString()),
-                                        f_instructiondesc = ToNull(reader["f_instructiondesc"]?.ToString()),
-                                        f_frequencycode = ToNull(reader["f_frequencycode"]?.ToString()),
-                                        f_frequencydesc = ToNull(reader["f_frequencydesc"]?.ToString()),
-                                        f_timecode = null,
-                                        f_timedesc = null,
-                                        f_frequencytime = ToNull(reader["f_frequencyTime"]?.ToString()),
-                                        f_dosagedispense = ToNull(reader["f_dosagedispense"]?.ToString()),
-                                        f_dayofweek = null,
-                                        f_noteprocessing = ToNull(reader["f_noteprocessing"]?.ToString()),
-                                        f_prn = ToNull(prn),
-                                        f_stat = ToNull(stat),
-                                        f_comment = ToNull(reader["f_comment"]?.ToString()),
-                                        f_tomachineno = decimal.TryParse(reader["f_tomachineno"]?.ToString(), out decimal machine) ? machine : (decimal?)null,
-                                        f_ipd_order_recordno = ToNull(reader["f_ipdpt_record_no"]?.ToString()),
-                                        f_status = ToNull(reader["f_status"]?.ToString()),
-                                        f_remark = ToNull(freetext1Parts.Length > 0 ? freetext1Parts[0] : null),
-                                        f_durationtext = ToNull(freetext1Parts.Length > 1 ? freetext1Parts[1] : null),
-                                        f_labeltext = ToNull(freetext2Parts.Length > 2 ? freetext2Parts[2] : null),
-                                        f_dosagedispense_compare = ToNull(freetext1Parts.Length > 2 ? freetext1Parts[2] : null),
-                                        f_ipdpt_record_no= ToNull(reader["f_ipdpt_record_no"]?.ToString())
-                                    };
-
+                                    // ⭐ เรียก BuildPrescriptionBody ที่ถูกต้อง
+                                    var prescriptionBody = BuildPrescriptionBody(reader);
                                     batchList.Add(prescriptionBody);
                                     batchPrescriptionInfo.Add((prescriptionNo, prescriptionDateFormatted));
+
+                                    // ⭐ ส่ง batch ทันที เมื่อเต็ม
+                                    if (batchList.Count >= _batchSize)
+                                    {
+                                        _logger?.LogInfo($"📦 Sending batch ({batchList.Count} items) - Batch full");
+                                        var (batchSuccess, batchFailed) = await SendBatchToApiAsync(batchList, batchPrescriptionInfo);
+                                        successCount += batchSuccess;
+                                        failedCount += batchFailed;
+
+                                        batchList.Clear();
+                                        batchPrescriptionInfo.Clear();
+                                    }
                                 }
                                 catch (Exception ex)
                                 {
@@ -258,20 +285,16 @@ namespace Interface_pattaya.Services
 
                                     if (!string.IsNullOrEmpty(prescriptionNo) && !string.IsNullOrEmpty(prescriptionDateFormatted))
                                     {
-                                       
-                                            await UpdateDispenseStatusAsync(prescriptionNo, prescriptionDateFormatted, "3");
-                                       
+                                        await UpdateDispenseStatusAsync(prescriptionNo, prescriptionDateFormatted, "3");
                                     }
                                 }
                             }
 
-                            // ⭐ ส่ง batch ทันที (ไม่รอให้เต็ม)
+                            // ⭐ ส่ง batch ที่เหลือ
                             if (batchList.Count > 0)
                             {
-                                _logger?.LogInfo($"📦 Sending batch ({batchList.Count} items)");
-
+                                _logger?.LogInfo($"📦 Sending batch ({batchList.Count} items) - Final");
                                 var (batchSuccess, batchFailed) = await SendBatchToApiAsync(batchList, batchPrescriptionInfo);
-
                                 successCount += batchSuccess;
                                 failedCount += batchFailed;
                             }
@@ -291,11 +314,9 @@ namespace Interface_pattaya.Services
             }
 
             _logger?.LogInfo($"📊 Complete - Success: {successCount}, Failed: {failedCount}");
-
             return (successCount, failedCount, errors);
         }
 
-        // ⭐ ปรับปรุง SendBatchToApiAsync
         private async Task<(int success, int failed)> SendBatchToApiAsync(
             List<PrescriptionBodyRequest> batchList,
             List<(string prescriptionNo, string prescriptionDate)> batchInfo)
@@ -310,12 +331,10 @@ namespace Interface_pattaya.Services
                     data = batchList.ToArray()
                 };
 
-                // ⭐ ใช้ cached options
                 var json = JsonSerializer.Serialize(body, _jsonOptions);
 
                 _logger?.LogInfo($"📤 Sending {batchList.Count} items ({json.Length / 1024.0:F1} KB)");
 
-                // ⭐ ลด log ลง - เหลือแค่ข้อมูลสำคัญ
                 if (batchList.Count > 0)
                 {
                     var first = batchList[0];
@@ -331,8 +350,6 @@ namespace Interface_pattaya.Services
                     _logger?.LogInfo($"✅ Success - {responseContent.Substring(0, Math.Min(100, responseContent.Length))}");
 
                     successCount = batchList.Count;
-
-                    // ⭐ Update แบบ batch (ใช้ transaction)
                     await UpdateBatchStatusAsync(batchInfo, "1");
                 }
                 else
@@ -348,16 +365,12 @@ namespace Interface_pattaya.Services
             {
                 _logger?.LogError($"❌ Send Exception", ex);
                 failedCount = batchList.Count;
-
-              
-                    await UpdateBatchStatusAsync(batchInfo, "3");
-              
+                await UpdateBatchStatusAsync(batchInfo, "3");
             }
 
             return (successCount, failedCount);
         }
 
-        // ⭐ ใหม่: Update แบบ batch (เร็วกว่า)
         private async Task UpdateBatchStatusAsync(
             List<(string prescriptionNo, string prescriptionDate)> batchInfo,
             string status)
@@ -367,11 +380,15 @@ namespace Interface_pattaya.Services
 
             try
             {
-                using (var connection = new MySqlConnection(_connectionString))
+                var connectionBuilder = new MySqlConnectionStringBuilder(_connectionString)
+                {
+                    ConnectionTimeout = 10
+                };
+
+                using (var connection = new MySqlConnection(connectionBuilder.ConnectionString))
                 {
                     await connection.OpenAsync();
 
-                    // ⭐ ใช้ Transaction
                     using (var transaction = await connection.BeginTransactionAsync())
                     {
                         try
@@ -389,7 +406,7 @@ namespace Interface_pattaya.Services
                                     command.Parameters.AddWithValue("@prescriptionnohis", prescriptionNo);
                                     command.Parameters.AddWithValue("@prescriptiondate", prescriptionDate);
                                     command.Parameters.AddWithValue("@Status", status);
-                                    command.CommandTimeout = 10; // ⭐ ลดเวลา
+                                    command.CommandTimeout = 10;
 
                                     await command.ExecuteNonQueryAsync();
                                 }
@@ -425,7 +442,12 @@ namespace Interface_pattaya.Services
 
             try
             {
-                using (var connection = new MySqlConnection(_connectionString))
+                var connectionBuilder = new MySqlConnectionStringBuilder(_connectionString)
+                {
+                    ConnectionTimeout = 10
+                };
+
+                using (var connection = new MySqlConnection(connectionBuilder.ConnectionString))
                 {
                     await connection.OpenAsync();
                     using (var command = new MySqlCommand(query, connection))
@@ -479,7 +501,12 @@ namespace Interface_pattaya.Services
 
             try
             {
-                using (var connection = new MySqlConnection(_connectionString))
+                var connectionBuilder = new MySqlConnectionStringBuilder(_connectionString)
+                {
+                    ConnectionTimeout = 10
+                };
+
+                using (var connection = new MySqlConnection(connectionBuilder.ConnectionString))
                 {
                     await connection.OpenAsync();
 
@@ -535,7 +562,7 @@ namespace Interface_pattaya.Services
         }
 
         public async Task<List<PrescriptionBodyRequest>> GetFullPrescriptionDataAsync(
-         List<(string prescriptionNo, string prescriptionDate)> prescriptions)
+            List<(string prescriptionNo, string prescriptionDate)> prescriptions)
         {
             var dataList = new List<PrescriptionBodyRequest>();
 
@@ -545,14 +572,19 @@ namespace Interface_pattaya.Services
             }
 
             string query = @"
-        SELECT * FROM tb_thaneshosp_middle
-        WHERE f_prescriptionnohis = @PrescriptionNo
-        AND SUBSTRING(f_prescriptiondate, 1, 8) = @PrescriptionDate
-        ORDER BY f_seq";
+                SELECT * FROM tb_thaneshosp_middle
+                WHERE f_prescriptionnohis = @PrescriptionNo
+                AND SUBSTRING(f_prescriptiondate, 1, 8) = @PrescriptionDate
+                ORDER BY f_seq";
 
             try
             {
-                using (var connection = new MySqlConnection(_connectionString))
+                var connectionBuilder = new MySqlConnectionStringBuilder(_connectionString)
+                {
+                    ConnectionTimeout = 10
+                };
+
+                using (var connection = new MySqlConnection(connectionBuilder.ConnectionString))
                 {
                     await connection.OpenAsync();
 
@@ -572,96 +604,7 @@ namespace Interface_pattaya.Services
                                     {
                                         try
                                         {
-                                            var seq = reader["f_seq"]?.ToString();
-                                            var prescriptionDateFull = reader["f_prescriptiondate"]?.ToString();
-                                            var prescriptionDateFormatted = ExtractDate(prescriptionDateFull);
-
-                                            var freetext1 = reader["f_freetext1"]?.ToString();
-                                            var freetext2 = reader["f_freetext2"]?.ToString();
-                                            var freetext1Parts = freetext1?.Split('^') ?? Array.Empty<string>();
-                                            var freetext2Parts = freetext2?.Split('^') ?? Array.Empty<string>();
-                                            var sex = ProcessSex(reader["f_sex"]?.ToString());
-                                            var prnValue = reader["f_PRN"]?.ToString();
-                                            var prn = ProcessPRN(prnValue, 1);
-                                            var stat = ProcessPRN(prnValue, 2);
-
-                                            var prescriptionBody = new PrescriptionBodyRequest
-                                            {
-                                                UniqID = ToNull(reader["f_referenceCode"]?.ToString()),
-                                                f_prescriptionno = ToNull(prescriptionNo),
-                                                f_seq = decimal.TryParse(seq, out decimal seqVal) ? seqVal : (decimal?)null,
-                                                f_seqmax = decimal.TryParse(reader["f_seqmax"]?.ToString(), out decimal seqmax) ? seqmax : (decimal?)null,
-                                                f_prescriptiondate = ToNull(prescriptionDateFormatted),
-                                                f_ordercreatedate = ToNull($"{reader["f_ordercreatedate"]} {reader["f_ordercreatetime"]}"),
-                                                f_ordertargetdate = ToNull(reader["f_ordertargetdate"]?.ToString()),
-                                                f_ordertargettime = ToNull(reader["f_ordertargettime"]?.ToString()),
-                                                f_doctorcode = ToNull(reader["f_doctorcode"]?.ToString()),
-                                                f_doctorname = ToNull(reader["f_doctorname"]?.ToString()),
-                                                f_useracceptby = ToNull(reader["f_useracceptby"]?.ToString()),
-                                                f_orderacceptdate = ToNull($"{reader["f_orderacceptdate"]} {reader["f_orderaccepttime"]}"),
-                                                f_orderacceptfromip = ToNull(reader["f_orderacceptfromip"]?.ToString()),
-                                                f_pharmacylocationcode = ToNull(reader["f_pharmacylocationpackcode"]?.ToString()),
-                                                f_pharmacylocationdesc = ToNull(reader["f_pharmacylocationpackdesc"]?.ToString()),
-                                                f_prioritycode = ToNull(reader["f_prioritycode"]?.ToString()),
-                                                f_prioritydesc = ToNull(reader["f_prioritydesc"]?.ToString()),
-                                                f_hn = ToNull(reader["f_hn"]?.ToString()),
-                                                f_an = ToNull(reader["f_en"]?.ToString()),
-                                                f_vn = null,
-                                                f_title = null,
-                                                f_patientname = ToNull(reader["f_patientname"]?.ToString()),
-                                                f_sex = ToNull(sex),
-                                                f_patientdob = ToNull(reader["f_patientdob"]?.ToString()),
-                                                f_wardcode = ToNull(reader["f_wardcode"]?.ToString()),
-                                                f_warddesc = ToNull(reader["f_warddesc"]?.ToString()),
-                                                f_roomcode = ToNull(reader["f_roomcode"]?.ToString()),
-                                                f_roomdesc = ToNull(reader["f_roomdesc"]?.ToString()),
-                                                f_bedcode = ToNull(reader["f_bedcode"]?.ToString()),
-                                                f_beddesc = ToNull(reader["f_bedcode"]?.ToString()),
-                                                f_right = null,
-                                                f_drugallergy = ToNull(reader["f_freetext4"]?.ToString()),
-                                                f_diagnosis = null,
-                                                f_orderitemcode = ToNull(freetext2Parts.Length > 0 ? freetext2Parts[0] : null),
-                                                f_orderitemname = ToNull(reader["f_orderitemname"]?.ToString()),
-                                                f_orderitemnameTH = ToNull(reader["f_orderitemnameTH"]?.ToString()),
-                                                f_orderitemnamegeneric = ToNull(reader["f_orderitemgenericname"]?.ToString()),
-                                                f_orderqty = decimal.TryParse(reader["f_orderqty"]?.ToString(), out decimal qty) ? qty : (decimal?)null,
-                                                f_orderunitcode = ToNull(reader["f_orderunitcode"]?.ToString()),
-                                                f_orderunitdesc = ToNull(reader["f_orderunitdesc"]?.ToString()),
-                                                f_dosage = decimal.TryParse(reader["f_dosage"]?.ToString(), out decimal dosage) ? dosage : (decimal?)null,
-                                                f_dosageunit = ToNull(reader["f_dosageunit"]?.ToString()),
-                                                f_dosagetext = null,
-                                                f_drugformcode = null,
-                                                f_drugformdesc = null,
-                                                f_HAD = ToNull(reader["f_heighAlertDrug"]?.ToString()) ?? "0",
-                                                f_narcoticFlg = ToNull(reader["f_narcoticdrug"]?.ToString()) ?? "0",
-                                                f_psychotropic = ToNull(reader["f_psychotropicDrug"]?.ToString()) ?? "0",
-                                                f_binlocation = ToNull(freetext2Parts.Length > 1 ? freetext2Parts[1] : null),
-                                                f_itemidentify = null,
-                                                f_itemlotno = ToNull(reader["f_itemlotcode"]?.ToString()),
-                                                f_itemlotexpire = ToNull(reader["f_itemlotexpire"]?.ToString()),
-                                                f_instructioncode = ToNull(reader["f_instructioncode"]?.ToString()),
-                                                f_instructiondesc = ToNull(reader["f_instructiondesc"]?.ToString()),
-                                                f_frequencycode = ToNull(reader["f_frequencycode"]?.ToString()),
-                                                f_frequencydesc = ToNull(reader["f_frequencydesc"]?.ToString()),
-                                                f_timecode = null,
-                                                f_timedesc = null,
-                                                f_frequencytime = ToNull(reader["f_frequencyTime"]?.ToString()),
-                                                f_dosagedispense = ToNull(reader["f_dosagedispense"]?.ToString()),
-                                                f_dayofweek = null,
-                                                f_noteprocessing = ToNull(reader["f_noteprocessing"]?.ToString()),
-                                                f_prn = ToNull(prn),
-                                                f_stat = ToNull(stat),
-                                                f_comment = ToNull(reader["f_comment"]?.ToString()),
-                                                f_tomachineno = decimal.TryParse(reader["f_tomachineno"]?.ToString(), out decimal machine) ? machine : (decimal?)null,
-                                                f_ipd_order_recordno = ToNull(reader["f_ipdpt_record_no"]?.ToString()),
-                                                f_status = ToNull(reader["f_status"]?.ToString()),
-                                                f_remark = ToNull(freetext1Parts.Length > 0 ? freetext1Parts[0] : null),
-                                                f_durationtext = ToNull(freetext1Parts.Length > 1 ? freetext1Parts[1] : null),
-                                                f_labeltext = ToNull(freetext2Parts.Length > 2 ? freetext2Parts[2] : null),
-                                                f_dosagedispense_compare = ToNull(freetext1Parts.Length > 2 ? freetext1Parts[2] : null),
-                                                f_ipdpt_record_no = ToNull(reader["f_ipdpt_record_no"]?.ToString())
-                                            };
-
+                                            var prescriptionBody = BuildPrescriptionBody(reader);
                                             dataList.Add(prescriptionBody);
                                         }
                                         catch (Exception ex)
