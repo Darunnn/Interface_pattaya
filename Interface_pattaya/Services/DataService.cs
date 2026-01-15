@@ -25,7 +25,7 @@ namespace Interface_pattaya.Services
             PropertyNamingPolicy = null,
             WriteIndented = false,
             Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.Never
         };
 
         public DataService(string connectionString, string apiUrl, LogManager logger = null, int batchSize = 100)
@@ -43,7 +43,21 @@ namespace Interface_pattaya.Services
             return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
         }
 
-        // ⭐ Helper method สำหรับสร้าง object
+        // ⭐ แก้ไข: รวมวันที่และเวลาอย่างถูกต้อง
+        private string CombineDateTimeOrNull(object date, object time)
+        {
+            var dateStr = date?.ToString()?.Trim();
+            var timeStr = time?.ToString()?.Trim();
+
+            if (string.IsNullOrWhiteSpace(dateStr))
+                return null;
+
+            if (string.IsNullOrWhiteSpace(timeStr))
+                return dateStr; // ส่งแค่วันที่ถ้าไม่มีเวลา
+
+            return $"{dateStr} {timeStr}";
+        }
+
         private PrescriptionBodyRequest BuildPrescriptionBody(IDataReader reader)
         {
             try
@@ -67,13 +81,18 @@ namespace Interface_pattaya.Services
                     f_seq = decimal.TryParse(seq, out decimal seqVal) ? seqVal : (decimal?)null,
                     f_seqmax = decimal.TryParse(reader["f_seqmax"]?.ToString(), out decimal seqmax) ? seqmax : (decimal?)null,
                     f_prescriptiondate = ToNull(prescriptionDateFormatted),
-                    f_ordercreatedate = ToNull($"{reader["f_ordercreatedate"]} {reader["f_ordercreatetime"]}"),
+
+                    // ⭐ แก้ไขตรงนี้
+                    f_ordercreatedate = ToNull(CombineDateTimeOrNull(reader["f_ordercreatedate"], reader["f_ordercreatetime"])),
                     f_ordertargetdate = ToNull(reader["f_ordertargetdate"]?.ToString()),
                     f_ordertargettime = ToNull(reader["f_ordertargettime"]?.ToString()),
                     f_doctorcode = ToNull(reader["f_doctorcode"]?.ToString()),
                     f_doctorname = ToNull(reader["f_doctorname"]?.ToString()),
                     f_useracceptby = ToNull(reader["f_useracceptby"]?.ToString()),
-                    f_orderacceptdate = ToNull($"{reader["f_orderacceptdate"]} {reader["f_orderaccepttime"]}"),
+
+                    // ⭐ แก้ไขตรงนี้
+                    f_orderacceptdate = ToNull(CombineDateTimeOrNull(reader["f_orderacceptdate"], reader["f_orderaccepttime"])),
+
                     f_orderacceptfromip = ToNull(reader["f_orderacceptfromip"]?.ToString()),
                     f_pharmacylocationcode = ToNull(reader["f_pharmacylocationpackcode"]?.ToString()),
                     f_pharmacylocationdesc = ToNull(reader["f_pharmacylocationpackdesc"]?.ToString()),
@@ -222,7 +241,6 @@ namespace Interface_pattaya.Services
 
             try
             {
-                // ⭐ สร้าง connection builder เพื่อตั้ง timeout
                 var connectionBuilder = new MySqlConnectionStringBuilder(_connectionString)
                 {
                     ConnectionTimeout = 10
@@ -261,12 +279,10 @@ namespace Interface_pattaya.Services
                                         continue;
                                     }
 
-                                    // ⭐ เรียก BuildPrescriptionBody ที่ถูกต้อง
                                     var prescriptionBody = BuildPrescriptionBody(reader);
                                     batchList.Add(prescriptionBody);
                                     batchPrescriptionInfo.Add((prescriptionNo, prescriptionDateFormatted));
 
-                                    // ⭐ ส่ง batch ทันที เมื่อเต็ม
                                     if (batchList.Count >= _batchSize)
                                     {
                                         _logger?.LogInfo($"📦 Sending batch ({batchList.Count} items) - Batch full");
@@ -290,7 +306,6 @@ namespace Interface_pattaya.Services
                                 }
                             }
 
-                            // ⭐ ส่ง batch ที่เหลือ
                             if (batchList.Count > 0)
                             {
                                 _logger?.LogInfo($"📦 Sending batch ({batchList.Count} items) - Final");
@@ -350,6 +365,8 @@ namespace Interface_pattaya.Services
                     _logger?.LogInfo($"✅ Success - {responseContent.Substring(0, Math.Min(100, responseContent.Length))}");
 
                     successCount = batchList.Count;
+
+                    // ⭐ แก้ไข: ใช้ Bulk Update แทนการ Loop
                     await UpdateBatchStatusAsync(batchInfo, "1");
                 }
                 else
@@ -371,6 +388,7 @@ namespace Interface_pattaya.Services
             return (successCount, failedCount);
         }
 
+        // ⭐ แก้ไข: ใช้ CASE WHEN แทนการ Loop
         private async Task UpdateBatchStatusAsync(
             List<(string prescriptionNo, string prescriptionDate)> batchInfo,
             string status)
@@ -389,37 +407,37 @@ namespace Interface_pattaya.Services
                 {
                     await connection.OpenAsync();
 
-                    using (var transaction = await connection.BeginTransactionAsync())
+                    // ⭐ สร้าง IN clause สำหรับ PrescriptionNo
+                    var prescriptionNos = batchInfo.Select(x => x.prescriptionNo).Distinct().ToList();
+                   
+
+                    if (prescriptionNos.Count == 0)
+                        return;
+
+                    // ⭐ ใช้ IN clause เพื่อ Update หลาย rows พร้อมกัน
+                    var inClause = string.Join(",", prescriptionNos.Select((_, i) => $"@Rx{i}"));
+                   
+
+                    string query = $@"
+                        UPDATE tb_thaneshosp_middle 
+                        SET f_dispensestatus_conhis = @Status
+                        WHERE f_prescriptionnohis IN ({inClause})
+                        AND SUBSTRING(f_prescriptiondate, 1, 8) = '{DateTime.Now.ToString("yyyyMMdd")}'";
+
+                    using (var command = new MySqlCommand(query, connection))
                     {
-                        try
+                        command.Parameters.AddWithValue("@Status", status);
+
+                        for (int i = 0; i < prescriptionNos.Count; i++)
                         {
-                            string query = @"
-                                UPDATE tb_thaneshosp_middle 
-                                SET f_dispensestatus_conhis = @Status
-                                WHERE f_prescriptionnohis = @prescriptionnohis 
-                                AND SUBSTRING(f_prescriptiondate, 1, 8) = @prescriptiondate";
-
-                            foreach (var (prescriptionNo, prescriptionDate) in batchInfo)
-                            {
-                                using (var command = new MySqlCommand(query, connection, transaction))
-                                {
-                                    command.Parameters.AddWithValue("@prescriptionnohis", prescriptionNo);
-                                    command.Parameters.AddWithValue("@prescriptiondate", prescriptionDate);
-                                    command.Parameters.AddWithValue("@Status", status);
-                                    command.CommandTimeout = 10;
-
-                                    await command.ExecuteNonQueryAsync();
-                                }
-                            }
-
-                            await transaction.CommitAsync();
-                            _logger?.LogInfo($"✅ Updated {batchInfo.Count} records to status '{status}'");
+                            command.Parameters.AddWithValue($"@Rx{i}", prescriptionNos[i]);
                         }
-                        catch
-                        {
-                            await transaction.RollbackAsync();
-                            throw;
-                        }
+
+                       
+                        command.CommandTimeout = 30;
+
+                        var affected = await command.ExecuteNonQueryAsync();
+                        _logger?.LogInfo($"✅ Updated {affected} records to status '{status}' (Expected: {batchInfo.Count})");
                     }
                 }
             }
