@@ -168,7 +168,7 @@ namespace Interface_pattaya.Services
             int successCount = 0;
             int failedCount = 0;
             var errors = new List<string>();
-            var currentDate = DateTime.Now.ToString("yyyyMMdd");
+            var currentDate = DateHelper.GetCurrentDateChristianEra();
 
             string query = $@"
                 SELECT 
@@ -422,7 +422,7 @@ namespace Interface_pattaya.Services
                         UPDATE tb_thaneshosp_middle 
                         SET f_dispensestatus_conhis = @Status
                         WHERE f_prescriptionnohis IN ({inClause})
-                        AND SUBSTRING(f_prescriptiondate, 1, 8) = '{DateTime.Now.ToString("yyyyMMdd")}'";
+                        AND SUBSTRING(f_prescriptiondate, 1, 8) = '{DateHelper.GetCurrentDateChristianEra()}'";
 
                     using (var command = new MySqlCommand(query, connection))
                     {
@@ -488,9 +488,9 @@ namespace Interface_pattaya.Services
         public async Task<List<GridViewDataModel>> GetPrescriptionDataAsync(string date = "", string searchText = "")
         {
             var dataList = new List<GridViewDataModel>();
-            var queryDate = string.IsNullOrEmpty(date)
-                ? DateTime.Now.ToString("yyyyMMdd")
-                : date.Replace("-", "");
+            string queryDate = string.IsNullOrEmpty(date)
+    ? DateHelper.GetCurrentDateChristianEra()
+    : date.Replace("-", "");
             bool hasSearchText = !string.IsNullOrWhiteSpace(searchText);
 
             string query = $@"

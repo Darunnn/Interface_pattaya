@@ -284,7 +284,8 @@ namespace Interface_pattaya
             {
                 _logger?.LogInfo("⏳ Loading initial data...");
                 await Task.Delay(500);
-                await LoadDataGridViewAsync(DateTime.Now.ToString("yyyy-MM-dd"), "");
+                string currentDate = DateHelper.ConvertToChristianEraFormatted(DateTime.Now);
+                await LoadDataGridViewAsync(currentDate, "");
                 _logger?.LogInfo("✅ Initial data loaded successfully");
             }
             catch (Exception ex)
@@ -591,8 +592,8 @@ namespace Interface_pattaya
 
                             lastFoundLabel.Text = $"Last Found: {totalFound} items";
 
-                            // ⭐ โหลดข้อมูลใหม่ทันที
-                            Task.Run(() => LoadDataGridViewAsync(DateTime.Now.ToString("yyyy-MM-dd")));
+                            string currentDate = DateHelper.ConvertToChristianEraFormatted(DateTime.Now);
+                            Task.Run(() => LoadDataGridViewAsync(currentDate));
                         }
                         else
                         {
@@ -649,7 +650,7 @@ namespace Interface_pattaya
         {
             try
             {
-                string selectedDate = dateTimePicker.Value.ToString("yyyy-MM-dd");
+                string selectedDate = DateHelper.ConvertToChristianEraFormatted(dateTimePicker.Value);
                 string searchText = searchTextBox.Text.Trim();
 
                 _logger?.LogInfo($"🔍 Search initiated - Date: {selectedDate}, Search: '{searchText}'");
@@ -681,11 +682,12 @@ namespace Interface_pattaya
 
                 UpdateStatus("🔄 Refreshing data...");
 
-                await LoadDataGridViewAsync(DateTime.Now.ToString("yyyy-MM-dd"), "");
+                string currentDate = DateHelper.ConvertToChristianEraFormatted(DateTime.Now);
+                await LoadDataGridViewAsync(currentDate, "");
 
                 UpdateStatus("✅ Data refreshed");
 
-                _logger?.LogInfo($"Data refreshed - Reset to current date: {DateTime.Now:yyyy-MM-dd}");
+                _logger?.LogInfo($"Data refreshed - Reset to current date: {currentDate}");
             }
             catch (Exception ex)
             {
@@ -746,8 +748,8 @@ namespace Interface_pattaya
             try
             {
                 string queryDate = string.IsNullOrEmpty(date)
-                    ? DateTime.Now.ToString("yyyyMMdd")
-                    : date.Replace("-", "");
+    ? DateHelper.GetCurrentDateChristianEra()
+    : date.Replace("-", "");
 
                 _logger?.LogInfo($"🔍 [DEBUG] Loading grid data - Input date: '{date}', Query date: '{queryDate}', Search: '{searchText}'");
 
