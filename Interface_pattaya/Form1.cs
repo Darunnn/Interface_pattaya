@@ -1208,7 +1208,21 @@ namespace Interface_pattaya
                 {
                     saveFileDialog.Filter = "JSON Files (*.json)|*.json";
                     saveFileDialog.DefaultExt = "json";
-                    saveFileDialog.FileName = $"Export_Prescriptions_{DateTime.Now:yyyyMMdd_HHmmss}.json";
+                    string fileNamePart = "";
+                    if (prescriptionList.Count == 1)
+                    {
+                        // ถ้ามี 1 prescription ใช้ Order No นั้น
+                        fileNamePart = prescriptionList[0].prescriptionNo;
+                    }
+                    else if (prescriptionList.Count > 1)
+                    {
+                        // ถ้ามีหลาย prescription ใช้ Order No แรกและสุดท้าย
+                        string firstOrder = prescriptionList[0].prescriptionNo;
+                        string lastOrder = prescriptionList[prescriptionList.Count - 1].prescriptionNo;
+                        fileNamePart = $"{firstOrder}_to_{lastOrder}";
+                    }
+
+                    saveFileDialog.FileName = $"Export_{fileNamePart}_{DateTime.Now:yyyyMMdd_HHmmss}.json";
 
                     if (saveFileDialog.ShowDialog() == DialogResult.OK)
                     {
