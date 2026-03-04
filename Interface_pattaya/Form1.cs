@@ -657,7 +657,6 @@ namespace Interface_pattaya
 
                 UpdateStatus($"🔍 Searching for '{searchText}' on {selectedDate}...");
 
-                await DebugDatabaseQuery(selectedDate);
                 await LoadDataGridViewAsync(selectedDate, searchText);
 
                 UpdateStatus($"✅ Search completed");
@@ -975,57 +974,7 @@ namespace Interface_pattaya
             }
         }
 
-        private async Task DebugDatabaseQuery(string date)
-        {
-            try
-            {
-                string queryDate = date.Replace("-", "");
-                _logger?.LogInfo($"🔍 [DEBUG CHECK] Checking database for date: {queryDate}");
 
-                string debugQuery = @"
-            SELECT COUNT(*) as total_count
-            FROM tb_thaneshosp_middle
-            WHERE SUBSTRING(f_prescriptiondate, 1, 8) = @QueryDate";
-
-                using (var connection = new MySqlConnection(_appConfig.ConnectionString))
-                {
-                    await connection.OpenAsync();
-                    using (var command = new MySqlCommand(debugQuery, connection))
-                    {
-                        command.Parameters.AddWithValue("@QueryDate", queryDate);
-                        var totalCount = await command.ExecuteScalarAsync();
-                        _logger?.LogInfo($"📊 [DEBUG] Total records for date {queryDate}: {totalCount}");
-                    }
-
-                    string statusQuery = @"
-                SELECT 
-                    COUNT(*) as count,
-                    f_dispensestatus_conhis as status
-                FROM tb_thaneshosp_middle
-                WHERE SUBSTRING(f_prescriptiondate, 1, 8) = @QueryDate
-                GROUP BY f_dispensestatus_conhis";
-
-                    using (var command = new MySqlCommand(statusQuery, connection))
-                    {
-                        command.Parameters.AddWithValue("@QueryDate", queryDate);
-                        using (var reader = await command.ExecuteReaderAsync())
-                        {
-                            _logger?.LogInfo($"📊 [DEBUG] Status breakdown:");
-                            while (await reader.ReadAsync())
-                            {
-                                var status = reader["status"]?.ToString() ?? "NULL";
-                                var count = reader["count"]?.ToString() ?? "0";
-                                _logger?.LogInfo($"   Status '{status}': {count} records");
-                            }
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogError("❌ Error in debug query", ex);
-            }
-        }
 
         private string FormatPrescriptionDate(string dateStr)
         {

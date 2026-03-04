@@ -32,7 +32,7 @@ namespace Interface_pattaya.Services
         {
             _connectionString = connectionString;
             _apiUrl = apiUrl;
-            _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+            _httpClient = new HttpClient ();
             _httpClient.DefaultRequestHeaders.ConnectionClose = false;
             _logger = logger ?? new LogManager();
             _batchSize = batchSize;
@@ -661,7 +661,18 @@ namespace Interface_pattaya.Services
 
         private string ProcessSex(string sex)
         {
-            return string.IsNullOrEmpty(sex) ? "U" : (sex == "0" ? "M" : "F");
+            if (string.IsNullOrEmpty(sex))
+                return "U";
+
+            switch (sex)
+            {
+                case "1":
+                    return "F";
+                case "0":
+                    return "M";
+                default:
+                    return "U";
+            }
         }
 
         private string ProcessPRN(string prnValue, int type)
