@@ -17,10 +17,8 @@ namespace Interface_pattaya
         private const string ConfigFile = "appsettings.ini";
         private readonly string _iniPath = Path.Combine(
           AppDomain.CurrentDomain.BaseDirectory, "Config", "CleanOldLogs.ini");
-        public bool SettingsChanged { get; private set; }
 
-        // ⭐ เพิ่ม field สำหรับเก็บ LogSettings ใน scope ของ class
-        private LogSettings _logSettings = new LogSettings();
+        public bool SettingsChanged { get; private set; }
 
         public SettingsForm()
         {
@@ -94,43 +92,43 @@ namespace Interface_pattaya
                             break;
                         case "APITIMEOUTSECONDS":
                             if (int.TryParse(value, out int timeout))
-                                numApiTimeout.Value = timeout;
+                                numApiTimeout.Value = Math.Max(numApiTimeout.Minimum, Math.Min(numApiTimeout.Maximum, timeout));
                             break;
                         case "APIRETRYATTEMPTS":
                             if (int.TryParse(value, out int retry))
-                                numApiRetry.Value = retry;
+                                numApiRetry.Value = Math.Max(numApiRetry.Minimum, Math.Min(numApiRetry.Maximum, retry));
                             break;
                         case "APIRETRYDELAYSECONDS":
                             if (int.TryParse(value, out int delay))
-                                numApiRetryDelay.Value = delay;
+                                numApiRetryDelay.Value = Math.Max(numApiRetryDelay.Minimum, Math.Min(numApiRetryDelay.Maximum, delay));
                             break;
                     }
                 }
             }
         }
 
-        // ✅ แก้: เปลี่ยนจาก void เป็น void จริงๆ และเก็บค่าใน _logSettings แทน return
+        // ✅ แก้: ใช้ numLogRetention โดยตรง ไม่ใช้ LogSettings
         private void LoadLogSettings()
         {
-            _logSettings = new LogSettings(); // default = 30 days
+            int days = 30; // default
 
-            if (!File.Exists(_iniPath))
-                return;
-
-            foreach (var line in File.ReadAllLines(_iniPath))
+            if (File.Exists(_iniPath))
             {
-                var parts = line.Split('=');
-                if (parts.Length == 2 &&
-                    parts[0].Trim().Equals("LogRetentionDays", StringComparison.OrdinalIgnoreCase))
+                foreach (var line in File.ReadAllLines(_iniPath))
                 {
-                    if (int.TryParse(parts[1].Trim(), out int days))
-                        _logSettings.LogRetentionDays = days;
-                    break;
+                    var parts = line.Split('=');
+                    if (parts.Length == 2 &&
+                        parts[0].Trim().Equals("LogRetentionDays", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (int.TryParse(parts[1].Trim(), out int parsed) && parsed > 0)
+                            days = parsed;
+                        break;
+                    }
                 }
             }
 
-            // ✅ ถ้ามี NumericUpDown สำหรับ LogRetentionDays ให้ set ค่าด้วย
-            // numLogRetentionDays.Value = _logSettings.LogRetentionDays;
+            // Clamp ให้อยู่ใน range ของ NumericUpDown (1-365)
+            numLogRetention.Value = Math.Max(numLogRetention.Minimum, Math.Min(numLogRetention.Maximum, days));
         }
 
         // ⭐ Test Database Connection
@@ -146,9 +144,9 @@ namespace Interface_pattaya
             try
             {
                 var connectionString = $"Server={txtServer.Text.Trim()};" +
-                                     $"Database={txtDatabase.Text.Trim()};" +
-                                     $"User Id={txtUserId.Text.Trim()};" +
-                                     $"Password={txtPassword.Text.Trim()};";
+                                       $"Database={txtDatabase.Text.Trim()};" +
+                                       $"User Id={txtUserId.Text.Trim()};" +
+                                       $"Password={txtPassword.Text.Trim()};";
 
                 await Task.Run(() =>
                 {
@@ -353,7 +351,7 @@ namespace Interface_pattaya
             File.WriteAllText(path, content.ToString());
         }
 
-        // ✅ แก้: ใช้ _logSettings แทน settings ที่ไม่มีใน scope
+        // ✅ แก้: บันทึกจาก numLogRetention โดยตรง
         private void SaveLogSettings()
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_iniPath));
@@ -362,19 +360,21 @@ namespace Interface_pattaya
                 ? new List<string>(File.ReadAllLines(_iniPath))
                 : new List<string>();
 
+            int retentionDays = (int)numLogRetention.Value;
             bool found = false;
+
             for (int i = 0; i < lines.Count; i++)
             {
                 if (lines[i].TrimStart().StartsWith("LogRetentionDays", StringComparison.OrdinalIgnoreCase))
                 {
-                    lines[i] = $"LogRetentionDays={_logSettings.LogRetentionDays}";
+                    lines[i] = $"LogRetentionDays={retentionDays}";
                     found = true;
                     break;
                 }
             }
 
             if (!found)
-                lines.Add($"LogRetentionDays={_logSettings.LogRetentionDays}");
+                lines.Add($"LogRetentionDays={retentionDays}");
 
             File.WriteAllLines(_iniPath, lines);
         }

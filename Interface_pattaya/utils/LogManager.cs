@@ -56,10 +56,13 @@ namespace Interface_pattaya.utils
             {
 
                 if (!File.Exists(_iniPath))
+                {
                     Directory.CreateDirectory(Path.GetDirectoryName(_iniPath));
-                File.WriteAllText(_iniPath, $"LogRetentionDays={defaultValue}");
-                LogToFile($"Config not found, created with default: {defaultValue} days", "DEBUG");
-                return defaultValue;
+                    File.WriteAllText(_iniPath, $"LogRetentionDays={defaultValue}");
+                    LogToFile($"Config not found, created with default: {defaultValue} days", "DEBUG");
+                    return defaultValue;
+                }
+                    
 
                 foreach (var line in File.ReadAllLines(_iniPath))
                 {
