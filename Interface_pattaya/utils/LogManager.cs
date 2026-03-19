@@ -46,15 +46,30 @@ namespace Interface_pattaya.utils
             }
         }
 
+        private readonly string _iniPath = Path.Combine(
+     AppDomain.CurrentDomain.BaseDirectory, "Config", "CleanOldLogs.ini");
+
         private int LoadLogRetentionDaysFromConfig(int defaultValue)
         {
             try
-            {
-                string configValue = ConfigurationManager.AppSettings["LogRetentionDays"];
 
-                if (!string.IsNullOrEmpty(configValue) && int.TryParse(configValue, out int days))
+            {
+
+                if (!File.Exists(_iniPath))
+                    Directory.CreateDirectory(Path.GetDirectoryName(_iniPath));
+                File.WriteAllText(_iniPath, $"LogRetentionDays={defaultValue}");
+                LogToFile($"Config not found, created with default: {defaultValue} days", "DEBUG");
+                return defaultValue;
+
+                foreach (var line in File.ReadAllLines(_iniPath))
                 {
-                    return days > 0 ? days : defaultValue;
+                    var parts = line.Split('=');
+                    if (parts.Length == 2 &&
+                        parts[0].Trim().Equals("LogRetentionDays", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (int.TryParse(parts[1].Trim(), out int days))
+                            return days > 0 ? days : defaultValue;
+                    }
                 }
 
                 return defaultValue;
@@ -69,7 +84,6 @@ namespace Interface_pattaya.utils
         {
             try
             {
-                ConfigurationManager.RefreshSection("appSettings");
                 _logRetentionDays = LoadLogRetentionDaysFromConfig(30);
                 LogInfo($"LogRetentionDays reloaded: {_logRetentionDays} days");
             }

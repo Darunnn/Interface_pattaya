@@ -1,14 +1,11 @@
 ﻿using MySql.Data.MySqlClient;
-using Org.BouncyCastle.Tls;
 using System;
-using System.Configuration;
+using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
-using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using MySql.Data.MySqlClient;
 
 namespace Interface_pattaya
 {
@@ -18,8 +15,12 @@ namespace Interface_pattaya
         private const string ConnFile = "connectdatabase.ini";
         private const string ConfigFolder = "Config";
         private const string ConfigFile = "appsettings.ini";
-
+        private readonly string _iniPath = Path.Combine(
+          AppDomain.CurrentDomain.BaseDirectory, "Config", "CleanOldLogs.ini");
         public bool SettingsChanged { get; private set; }
+
+        // ⭐ เพิ่ม field สำหรับเก็บ LogSettings ใน scope ของ class
+        private LogSettings _logSettings = new LogSettings();
 
         public SettingsForm()
         {
@@ -50,8 +51,6 @@ namespace Interface_pattaya
         {
             var path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, ConnFolder, ConnFile);
 
-         
-
             if (File.Exists(path))
             {
                 var lines = File.ReadAllLines(path);
@@ -67,7 +66,6 @@ namespace Interface_pattaya
                         txtUserId.Text = line.Replace("User Id=", "").Trim().TrimEnd(';');
                     else if (line.StartsWith("Password="))
                         txtPassword.Text = line.Replace("Password=", "").Trim().TrimEnd(';');
-                 
                 }
             }
         }
@@ -111,13 +109,28 @@ namespace Interface_pattaya
             }
         }
 
+        // ✅ แก้: เปลี่ยนจาก void เป็น void จริงๆ และเก็บค่าใน _logSettings แทน return
         private void LoadLogSettings()
         {
-            var logDays = ConfigurationManager.AppSettings["LogRetentionDays"];
-            if (!string.IsNullOrEmpty(logDays) && int.TryParse(logDays, out int days))
+            _logSettings = new LogSettings(); // default = 30 days
+
+            if (!File.Exists(_iniPath))
+                return;
+
+            foreach (var line in File.ReadAllLines(_iniPath))
             {
-                numLogRetention.Value = days;
+                var parts = line.Split('=');
+                if (parts.Length == 2 &&
+                    parts[0].Trim().Equals("LogRetentionDays", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (int.TryParse(parts[1].Trim(), out int days))
+                        _logSettings.LogRetentionDays = days;
+                    break;
+                }
             }
+
+            // ✅ ถ้ามี NumericUpDown สำหรับ LogRetentionDays ให้ set ค่าด้วย
+            // numLogRetentionDays.Value = _logSettings.LogRetentionDays;
         }
 
         // ⭐ Test Database Connection
@@ -132,14 +145,10 @@ namespace Interface_pattaya
 
             try
             {
-                // Get charset based on selected encoding
-
-
                 var connectionString = $"Server={txtServer.Text.Trim()};" +
                                      $"Database={txtDatabase.Text.Trim()};" +
                                      $"User Id={txtUserId.Text.Trim()};" +
                                      $"Password={txtPassword.Text.Trim()};";
-                                     
 
                 await Task.Run(() =>
                 {
@@ -147,7 +156,6 @@ namespace Interface_pattaya
                     {
                         connection.Open();
 
-                        // Test query
                         using (var cmd = new MySqlCommand("SELECT VERSION()", connection))
                         {
                             var version = cmd.ExecuteScalar()?.ToString() ?? "Unknown";
@@ -182,7 +190,6 @@ namespace Interface_pattaya
                     $"• Server address และ port\n" +
                     $"• Database name\n" +
                     $"• Username และ Password\n" +
-                    $"• Encoding setting\n" +
                     $"• Network connectivity",
                     "Connection Failed",
                     MessageBoxButtons.OK,
@@ -195,8 +202,6 @@ namespace Interface_pattaya
             }
         }
 
-
-
         private void BtnSave_Click(object sender, EventArgs e)
         {
             try
@@ -208,8 +213,7 @@ namespace Interface_pattaya
                     "คุณต้องการบันทึกการตั้งค่าทั้งหมดหรือไม่?\n\n" +
                     "📁 ไฟล์ที่จะถูกแก้ไข:\n" +
                     "   • Connection\\connectdatabase.ini\n" +
-                    "   • Config\\appsettings.ini\n" +
-                    "   • App.config\n\n" +
+                    "   • Config\\appsettings.ini\n\n" +
                     "⚠️ หมายเหตุ: การตั้งค่าบางอย่างอาจต้อง Restart โปรแกรม",
                     "Confirm Save",
                     MessageBoxButtons.YesNo,
@@ -229,8 +233,7 @@ namespace Interface_pattaya
                     "✅ บันทึกการตั้งค่าทั้งหมดสำเร็จ!\n\n" +
                     "ไฟล์ที่ถูกอัพเดท:\n" +
                     $"✓ {Path.Combine(ConnFolder, ConnFile)}\n" +
-                    $"✓ {Path.Combine(ConfigFolder, ConfigFile)}\n" +
-                    "✓ App.config\n\n" +
+                    $"✓ {Path.Combine(ConfigFolder, ConfigFile)}\n\n" +
                     "💡 การตั้งค่าจะมีผลในครั้งถัดไปที่โปรแกรมโหลดข้อมูล",
                     "Success",
                     MessageBoxButtons.OK,
@@ -277,18 +280,14 @@ namespace Interface_pattaya
                 return false;
             }
 
-           
-
             return true;
         }
 
         private bool ValidateInputs()
         {
-            // Validate Database Settings
             if (!ValidateDatabaseInputs())
                 return false;
 
-            // Validate API Settings
             if (string.IsNullOrWhiteSpace(txtApiEndpoint.Text))
             {
                 MessageBox.Show("กรุณาระบุ API Endpoint", "Validation Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -317,15 +316,11 @@ namespace Interface_pattaya
 
             var path = Path.Combine(directory, ConnFile);
 
-            // Determine charset based on selected encoding
-            
-
             var content = new StringBuilder();
             content.AppendLine($"Server={txtServer.Text.Trim()};");
             content.AppendLine($"Database={txtDatabase.Text.Trim()};");
             content.AppendLine($"User Id={txtUserId.Text.Trim()};");
             content.AppendLine($"Password={txtPassword.Text.Trim()};");
-           
 
             File.WriteAllText(path, content.ToString());
         }
@@ -351,32 +346,37 @@ namespace Interface_pattaya
             content.AppendLine($"ApiRetryDelaySeconds={numApiRetryDelay.Value}");
             content.AppendLine();
             content.AppendLine("# ===== PROCESSING SETTINGS =====");
-            content.AppendLine("# ระยะเวลาในการตรวจสอบข้อมูลใหม่ (วินาที)");
-            content.AppendLine("# ค่าที่แนะนำ: 15-60 วินาที");
             content.AppendLine("ProcessingIntervalSeconds=1");
-            content.AppendLine("# จำนวนสูงสุดของ records ที่ประมวลผลในแต่ละรอบ");
             content.AppendLine("MaxProcessingBatchSize=50");
-            content.AppendLine("# เริ่มการประมวลผลอัตโนมัติเมื่อเปิดโปรแกรม (true/false)");
             content.AppendLine("AutoStart=true");
 
             File.WriteAllText(path, content.ToString());
         }
 
+        // ✅ แก้: ใช้ _logSettings แทน settings ที่ไม่มีใน scope
         private void SaveLogSettings()
         {
-            var config = ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.None);
+            Directory.CreateDirectory(Path.GetDirectoryName(_iniPath));
 
-            if (config.AppSettings.Settings["LogRetentionDays"] == null)
+            var lines = File.Exists(_iniPath)
+                ? new List<string>(File.ReadAllLines(_iniPath))
+                : new List<string>();
+
+            bool found = false;
+            for (int i = 0; i < lines.Count; i++)
             {
-                config.AppSettings.Settings.Add("LogRetentionDays", numLogRetention.Value.ToString());
-            }
-            else
-            {
-                config.AppSettings.Settings["LogRetentionDays"].Value = numLogRetention.Value.ToString();
+                if (lines[i].TrimStart().StartsWith("LogRetentionDays", StringComparison.OrdinalIgnoreCase))
+                {
+                    lines[i] = $"LogRetentionDays={_logSettings.LogRetentionDays}";
+                    found = true;
+                    break;
+                }
             }
 
-            config.Save(ConfigurationSaveMode.Modified);
-            ConfigurationManager.RefreshSection("appSettings");
+            if (!found)
+                lines.Add($"LogRetentionDays={_logSettings.LogRetentionDays}");
+
+            File.WriteAllLines(_iniPath, lines);
         }
 
         private void BtnCancel_Click(object sender, EventArgs e)
